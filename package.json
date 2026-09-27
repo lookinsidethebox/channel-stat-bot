@@ -1,0 +1,17 @@
+{
+  "name": "channel-stat-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot starter",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
