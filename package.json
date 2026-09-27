@@ -1,11 +1,12 @@
 {
   "name": "channel-stat-bot",
   "version": "1.0.0",
-  "description": "Telegram bot starter",
+  "description": "Telegram channel membership and campaign tracking bot",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon --watch src --ext js src/index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
