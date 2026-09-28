@@ -111,6 +111,7 @@ function createMemberStore(filePath = defaultFilePath) {
         removedAt: joined ? null : event.occurredAt,
         postAtRemoval: joined ? null : post,
         returned: joined && Boolean(previous),
+        ...(joined && event.sourceLookup ? { sourceLookup: event.sourceLookup } : {}),
         ...(event.postLookupError ? {
           [joined ? 'postAtAdditionError' : 'postAtRemovalError']: event.postLookupError,
         } : {}),
@@ -119,7 +120,34 @@ function createMemberStore(filePath = defaultFilePath) {
     });
   }
 
-  return { recordMemberEvent, saveLatestPost };
+  async function getPendingSourceLookups() {
+    await writeQueue;
+    const data = await readMemberData(filePath);
+    return data.members.filter(member => member.sourceLookup?.status === 'pending');
+  }
+
+  async function getMember(userId, addedAt) {
+    await writeQueue;
+    const data = await readMemberData(filePath);
+    return data.members.find(member => String(member.userId) === String(userId) && member.addedAt === addedAt);
+  }
+
+  function resolveMemberSource(decision) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(decision.userId)
+        && entry.addedAt === decision.addedAt);
+      if (!member || member.sourceLookup?.status !== 'pending') return false;
+      // Direct Telegram metadata and owner corrections always take precedence.
+      if (decision.source && member.source?.type === 'unknown') member.source = decision.source;
+      member.sourceLookup = {
+        status: decision.status, day: decision.day, checkedAt: decision.checkedAt,
+        ...(decision.source ? { statisticsSource: decision.source.type } : { reason: decision.reason }),
+      };
+      return member;
+    });
+  }
+
+  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember };
 }
 
 module.exports = { createMemberStore };

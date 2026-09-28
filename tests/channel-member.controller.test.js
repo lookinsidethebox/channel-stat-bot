@@ -208,3 +208,24 @@ test('preserves the membership event and reports a post lookup failure', async (
   assert.equal(events[0][1], null);
   assert.match(sentMessages[0][1], /Пост не получен: Telegram unavailable/);
 });
+
+test('a saved join checks statistics and uses the resolved source in its notification', async () => {
+  const calls = [];
+  const { handler } = registerHandler({
+    recordMemberEvent: async event => { calls.push('save'); assert.equal(event.sourceLookup.status, 'pending'); return true; },
+    sourceStatistics: { checkJoin: async () => { calls.push('statistics'); return { source: { type: 'ads', name: null, attribution: 'statistics_delta' }, sourceLookup: { status: 'matched' } }; } },
+  });
+  const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
+  await handler(context);
+  assert.deepEqual(calls, ['save', 'statistics']);
+  assert.match(sentMessages[0][1], /Ads \(по изменению статистики\)/);
+});
+
+test('leaves and duplicate joins do not query source statistics', async () => {
+  let calls = 0;
+  for (const oldStatus of ['left', 'member']) {
+    const { handler } = registerHandler({ recordMemberEvent: async () => oldStatus !== 'left', sourceStatistics: { checkJoin: async () => { calls += 1; } } });
+    await handler(createContext({ oldStatus, newStatus: oldStatus === 'left' ? 'member' : 'left' }).context);
+  }
+  assert.equal(calls, 0);
+});

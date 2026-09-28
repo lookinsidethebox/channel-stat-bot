@@ -1,0 +1,7 @@
+.git/
+.env
+.telegram/
+data/
+node_modules/
+.backups/
+backups/

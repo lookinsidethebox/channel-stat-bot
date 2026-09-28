@@ -5,12 +5,13 @@ async function main() {
   require('dotenv').config();
   const bot = createBot(loadConfig());
 
-  function stop(signal) {
+  async function stop(signal) {
     try {
       bot.stop(signal);
     } catch (error) {
       // During connection setup there is no polling loop to stop yet.
       if (error.message !== 'Bot is not running!') throw error;
+      await bot.sourceStatistics?.stop();
       process.exit(0);
     }
   }
@@ -21,12 +22,14 @@ async function main() {
   process.once('SIGTERM', onTerminate);
 
   try {
+    await bot.sourceStatistics?.start();
     await bot.launch({
       allowedUpdates: ['message', 'chat_member', 'channel_post', 'edited_channel_post'],
     }, () => {
       console.log('Connected to Telegram. Starting the bot.');
     });
   } finally {
+    await bot.sourceStatistics?.stop();
     process.off('SIGINT', onInterrupt);
     process.off('SIGTERM', onTerminate);
   }

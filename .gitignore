@@ -3,3 +3,8 @@ node_modules/
 npm-debug.log*
 .DS_Store
 /data/
+/.telegram/
+
+# Local and downloaded backups.
+.backups/
+backups/

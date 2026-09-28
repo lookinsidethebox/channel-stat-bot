@@ -18,7 +18,12 @@ function loadConfig(env = process.env) {
     throw new Error('CHANNEL_ID must be a negative numeric Telegram channel ID (not @username).');
   }
 
-  return { token, ownerId, channelId, debugMemberUpdates: env.DEBUG_MEMBER_UPDATES === '1' };
+  const config = { token, ownerId, channelId, debugMemberUpdates: env.DEBUG_MEMBER_UPDATES === '1' };
+  if (env.SOURCE_STATS_ENABLED === '1') {
+    const { readAuthConfig, getSessionPath } = require('./services/telegram-user-session');
+    config.sourceStatistics = { ...readAuthConfig({ ...env, OWNER_ID: ownerId }), channelId, sessionPath: getSessionPath(env) };
+  }
+  return config;
 }
 
 module.exports = { loadConfig };

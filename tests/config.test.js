@@ -28,3 +28,11 @@ test('rejects IDs that would never match Telegram updates', () => {
     assert.throws(() => loadConfig({ ...validEnv, CHANNEL_ID: channelId }), /CHANNEL_ID/);
   }
 });
+
+test('source statistics require explicit enablement and validate credentials without exposing them', () => {
+  assert.equal(loadConfig(validEnv).sourceStatistics, undefined);
+  assert.throws(() => loadConfig({ ...validEnv, SOURCE_STATS_ENABLED: '1' }), /TELEGRAM_API_ID/);
+  const config = loadConfig({ ...validEnv, SOURCE_STATS_ENABLED: '1', TELEGRAM_API_ID: '12345', TELEGRAM_API_HASH: '0123456789abcdef0123456789abcdef', TELEGRAM_SESSION_PATH: '/app/data/.telegram/user.session' });
+  assert.equal(config.sourceStatistics.apiId, 12345);
+  assert.equal(config.sourceStatistics.sessionPath, '/app/data/.telegram/user.session');
+});
