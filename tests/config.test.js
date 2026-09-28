@@ -36,3 +36,11 @@ test('source statistics require explicit enablement and validate credentials wit
   assert.equal(config.sourceStatistics.apiId, 12345);
   assert.equal(config.sourceStatistics.sessionPath, '/app/data/.telegram/user.session');
 });
+
+test('Ads token enables campaign attribution only with channel source statistics', () => {
+  assert.throws(() => loadConfig({ ...validEnv, TELEGRAM_ADS_API_TOKEN: 'secret' }), /requires SOURCE_STATS_ENABLED/);
+  assert.equal(loadConfig({ ...validEnv, TELEGRAM_ADS_API_TOKEN: ' ' }).adsStatistics, undefined);
+  const config = loadConfig({ ...validEnv, SOURCE_STATS_ENABLED: '1', TELEGRAM_API_ID: '12345',
+    TELEGRAM_API_HASH: '0123456789abcdef0123456789abcdef', TELEGRAM_ADS_API_TOKEN: ' secret ' });
+  assert.deepEqual(config.adsStatistics, { token: 'secret', channelId: validEnv.CHANNEL_ID });
+});

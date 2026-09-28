@@ -221,6 +221,42 @@ test('a saved join checks statistics and uses the resolved source in its notific
   assert.match(sentMessages[0][1], /Ads \(по изменению статистики\)/);
 });
 
+test('checks the ad campaign after resolving Ads and includes it in the first notification', async () => {
+  const calls = [];
+  const { handler } = registerHandler({
+    recordMemberEvent: async event => {
+      calls.push('save');
+      assert.equal(event.campaignLookup.status, 'pending');
+      return true;
+    },
+    sourceStatistics: { checkJoin: async () => {
+      calls.push('source');
+      return { source: { type: 'ads', attribution: 'statistics_delta' }, sourceLookup: { status: 'matched' } };
+    } },
+    adsStatistics: { checkJoin: async () => {
+      calls.push('ads');
+      return { campaign: { adId: 46, title: 'Любовные романы' } };
+    } },
+  });
+  const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
+  await handler(context);
+  assert.deepEqual(calls, ['save', 'source', 'ads']);
+  assert.match(sentMessages[0][1], /Ads \(по изменению статистики\)/);
+  assert.match(sentMessages[0][1], /Любовные романы.*ID 46/);
+});
+
+test('duplicate and departure updates do not query Ads', async () => {
+  let calls = 0;
+  for (const oldStatus of ['left', 'member']) {
+    const { handler } = registerHandler({
+      recordMemberEvent: async () => oldStatus !== 'left',
+      adsStatistics: { checkJoin: async () => { calls++; } },
+    });
+    await handler(createContext({ oldStatus, newStatus: oldStatus === 'left' ? 'member' : 'left' }).context);
+  }
+  assert.equal(calls, 0);
+});
+
 test('leaves and duplicate joins do not query source statistics', async () => {
   let calls = 0;
   for (const oldStatus of ['left', 'member']) {

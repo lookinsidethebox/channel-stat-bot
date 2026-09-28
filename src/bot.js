@@ -10,14 +10,29 @@ const { createMemberStore } = require('./storage/member.store');
 const { createSourceStatisticsStore } = require('./storage/source-statistics.store');
 const { createSourceStatisticsMonitor } = require('./services/source-statistics-monitor.service');
 const { createTelegramStatisticsReader } = require('./services/telegram-statistics.service');
+const { createTelegramAdsReader } = require('./services/telegram-ads.service');
+const { createAdsStatisticsStore } = require('./storage/ads-statistics.store');
+const { createAdsStatisticsMonitor } = require('./services/ads-statistics-monitor.service');
 
-function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig }, {
+function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig }, {
   memberStore = createMemberStore(),
   statisticsStore = createSourceStatisticsStore(channelId),
   statisticsReader,
+  adsStatisticsStore = createAdsStatisticsStore(channelId),
+  adsStatisticsReader,
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
+  if (adsConfig) {
+    bot.adsStatistics = createAdsStatisticsMonitor({
+      reader: adsStatisticsReader || createTelegramAdsReader({ ...adsConfig, getChannel: () => bot.telegram.getChat(channelId) }),
+      statisticsStore: adsStatisticsStore, memberStore, logger,
+      onResolved: async member => {
+        const name = member.username ? `@${member.username}` : member.name || `ID ${member.userId}`;
+        await bot.telegram.sendMessage(ownerId, `Уточнена реклама для ${name} (${member.userId}).${registerChannelMemberController.describeCampaign(member.campaign)}`);
+      },
+    });
+  }
   if (statisticsConfig) {
     bot.sourceStatistics = createSourceStatisticsMonitor({
       reader: statisticsReader || createTelegramStatisticsReader(statisticsConfig),
@@ -39,6 +54,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     ownerId,
     recordMemberEvent: memberStore.recordMemberEvent,
     sourceStatistics: bot.sourceStatistics,
+    adsStatistics: bot.adsStatistics,
     logger,
   });
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });

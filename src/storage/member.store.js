@@ -112,6 +112,7 @@ function createMemberStore(filePath = defaultFilePath) {
         postAtRemoval: joined ? null : post,
         returned: joined && Boolean(previous),
         ...(joined && event.sourceLookup ? { sourceLookup: event.sourceLookup } : {}),
+        ...(joined && event.campaignLookup ? { campaignLookup: event.campaignLookup } : {}),
         ...(event.postLookupError ? {
           [joined ? 'postAtAdditionError' : 'postAtRemovalError']: event.postLookupError,
         } : {}),
@@ -147,7 +148,29 @@ function createMemberStore(filePath = defaultFilePath) {
     });
   }
 
-  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember };
+  async function getPendingCampaignLookups() {
+    await writeQueue;
+    return (await readMemberData(filePath)).members.filter(member => member.campaignLookup?.status === 'pending');
+  }
+
+  function resolveMemberCampaign(decision) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(decision.userId)
+        && entry.addedAt === decision.addedAt);
+      if (!member || member.campaignLookup?.status !== 'pending') return false;
+      const eligible = member.source?.type === 'ads' && !member.campaign;
+      if (decision.campaign && eligible) member.campaign = decision.campaign;
+      member.campaignLookup = {
+        status: decision.campaign && !eligible ? 'not_applicable' : decision.status,
+        checkedAt: decision.checkedAt,
+        ...(decision.reason ? { reason: decision.reason } : {}),
+      };
+      return member;
+    });
+  }
+
+  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember,
+    getPendingCampaignLookups, resolveMemberCampaign };
 }
 
 module.exports = { createMemberStore };

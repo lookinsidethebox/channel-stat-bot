@@ -12,6 +12,7 @@ async function main() {
       // During connection setup there is no polling loop to stop yet.
       if (error.message !== 'Bot is not running!') throw error;
       await bot.sourceStatistics?.stop();
+      await bot.adsStatistics?.stop();
       process.exit(0);
     }
   }
@@ -22,6 +23,7 @@ async function main() {
   process.once('SIGTERM', onTerminate);
 
   try {
+    await bot.adsStatistics?.start();
     await bot.sourceStatistics?.start();
     await bot.launch({
       allowedUpdates: ['message', 'chat_member', 'channel_post', 'edited_channel_post'],
@@ -30,6 +32,7 @@ async function main() {
     });
   } finally {
     await bot.sourceStatistics?.stop();
+    await bot.adsStatistics?.stop();
     process.off('SIGINT', onInterrupt);
     process.off('SIGTERM', onTerminate);
   }

@@ -8,7 +8,8 @@
     "dev": "nodemon --watch src --ext js src/index.js",
     "test": "node --test",
     "telegram:login": "node scripts/telegram-login.js",
-    "telegram:check": "node scripts/telegram-login.js --check"
+    "telegram:check": "node scripts/telegram-login.js --check",
+    "ads:check": "node scripts/telegram-ads-check.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

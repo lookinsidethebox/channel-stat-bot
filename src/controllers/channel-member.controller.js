@@ -35,7 +35,7 @@ function describeSource(source, lookup) {
 }
 
 function registerChannelMemberController(bot, {
-  channelId, ownerId, recordMemberEvent, fetchPost = fetchChannelPostAt, sourceStatistics, logger = console,
+  channelId, ownerId, recordMemberEvent, fetchPost = fetchChannelPostAt, sourceStatistics, adsStatistics, logger = console,
 }) {
   bot.on('chat_member', async (context) => {
     const update = context.chatMember;
@@ -58,6 +58,7 @@ function registerChannelMemberController(bot, {
     }
 
     if (sourceStatistics && event.action === 'joined') event.sourceLookup = { status: 'pending' };
+    if (adsStatistics && event.action === 'joined') event.campaignLookup = { status: 'pending' };
     const saved = await recordMemberEvent(event, post);
     if (!saved) {
       return;
@@ -75,13 +76,22 @@ function registerChannelMemberController(bot, {
       }
     }
 
+    if (adsStatistics && event.action === 'joined') {
+      try {
+        const updated = await adsStatistics.checkJoin(event);
+        if (updated) event.campaign = updated.campaign;
+      } catch {
+        logger.error('Ads statistics state error.');
+      }
+    }
+
     const user = event.user;
     const userName = user.username
       ? `@${user.username}`
       : user.name || `ID ${user.id}`;
     const action = event.action === 'joined' ? 'добавлен в канал' : 'покинул канал';
     const sourceText = event.action === 'joined'
-      ? ` Источник: ${describeSource(event.source, event.sourceLookup)}.`
+      ? ` Источник: ${describeSource(event.source, event.sourceLookup)}.${describeCampaign(event.campaign)}`
       : ' Запись об отписке сохранена.';
     const postErrorText = event.postLookupError ? ` Пост не получен: ${event.postLookupError}` : '';
     const message = `Пользователь ${userName} (${user.id}) ${action}.${sourceText}${postErrorText}`;
@@ -91,5 +101,10 @@ function registerChannelMemberController(bot, {
   });
 }
 
+function describeCampaign(campaign) {
+  return campaign ? ` Объявление: «${campaign.title}» (ID ${campaign.adId}, по изменению статистики Ads).` : '';
+}
+
 module.exports = registerChannelMemberController;
 module.exports.describeSource = describeSource;
+module.exports.describeCampaign = describeCampaign;

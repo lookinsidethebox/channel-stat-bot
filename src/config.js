@@ -23,6 +23,10 @@ function loadConfig(env = process.env) {
     const { readAuthConfig, getSessionPath } = require('./services/telegram-user-session');
     config.sourceStatistics = { ...readAuthConfig({ ...env, OWNER_ID: ownerId }), channelId, sessionPath: getSessionPath(env) };
   }
+  if (env.TELEGRAM_ADS_API_TOKEN?.trim()) {
+    if (!config.sourceStatistics) throw new Error('TELEGRAM_ADS_API_TOKEN requires SOURCE_STATS_ENABLED=1.');
+    config.adsStatistics = { token: env.TELEGRAM_ADS_API_TOKEN.trim(), channelId };
+  }
   return config;
 }
 
