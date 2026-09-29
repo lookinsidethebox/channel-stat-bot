@@ -149,6 +149,17 @@ function createMemberStore(filePath = defaultFilePath) {
     return members.slice(0, currentIndex).filter(member => String(member.userId) === String(userId));
   }
 
+  async function countEvents(from, to) {
+    const start = Date.parse(from);
+    const end = Date.parse(to);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new Error('INVALID_MEMBER_EVENT_PERIOD');
+    await writeQueue;
+    const { members } = await readMemberData(filePath);
+    const inPeriod = value => value && Date.parse(value) >= start && Date.parse(value) < end;
+    return { joined: members.filter(member => inPeriod(member.addedAt)).length,
+      left: members.filter(member => inPeriod(member.removedAt)).length };
+  }
+
   function resolveMemberSource(decision) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(decision.userId)
@@ -218,7 +229,7 @@ function createMemberStore(filePath = defaultFilePath) {
   }
 
   return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember, getMemberAtRemoval,
-    getMemberHistory, getPendingCampaignLookups, resolveMemberCampaign, getPendingJoinNotifications,
+    getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, getPendingJoinNotifications,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }
 

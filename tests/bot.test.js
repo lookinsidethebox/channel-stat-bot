@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { createBot } = require('../src/bot');
 const { createMemberStore } = require('../src/storage/member.store');
+const { createDailySummaryStore } = require('../src/storage/daily-summary.store');
 
 const config = { token: 'test-token', ownerId: '123', channelId: '-100456' };
 
@@ -202,5 +203,43 @@ test('an untracked departure has no history lines, even when older closed period
   } });
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0][1], '👎 Подписчик покинул канал! Да и хуй с ним.\n\nИмя: Анна');
+  assert.deepEqual(errors, []);
+});
+
+test('the assembled bot reads post counters through the shared reader and sends an HTML summary only to the owner', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-stat-bot-summary-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const channelId = '-1001234567890';
+  const summaryStore = createDailySummaryStore(channelId, path.join(directory, 'summary.json'));
+  await summaryStore.initialize('2026-01-01T00:00:00.000Z');
+  const sent = [];
+  const errors = [];
+  let reads = 0;
+  let closed = 0;
+  const bot = createBot({ ...config, channelId, sourceStatistics: {}, dailySummary: true }, {
+    dailySummaryStore: summaryStore,
+    memberStore: { countEvents: async () => ({ joined: 3, left: 1 }) },
+    statisticsReader: { fetchPosts: async ({ before }) => {
+      reads++;
+      assert.ok(Date.parse(before) <= Date.now());
+      return { channelId, fetchedAt: new Date().toISOString(), posts: [{
+        messageId: 42, postedAt: '2025-01-01T00:00:00.000Z', preview: '<Test>', views: 10, reactions: 2, forwards: 1,
+      }] };
+    }, close: async () => { closed++; } },
+    logger: { log() {}, error: (...args) => errors.push(args) },
+  });
+  bot.telegram.sendMessage = async (...args) => { sent.push(args); };
+  await bot.dailySummary.checkPending();
+  await bot.dailySummary.checkPending();
+  await bot.dailySummary.stop();
+  await bot.sourceStatistics.stop();
+  assert.equal(reads, 1);
+  assert.equal(closed, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], config.ownerId);
+  assert.match(sent[0][1], /<b>📈 Статистика за сутки<\/b>/);
+  assert.match(sent[0][1], /Пользователей добавилось на канал: 3/);
+  assert.match(sent[0][1], /Пост: &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
+  assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
   assert.deepEqual(errors, []);
 });

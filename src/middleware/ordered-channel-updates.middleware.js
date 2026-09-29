@@ -1,7 +1,7 @@
 function createOrderedChannelUpdatesMiddleware() {
   let queue = Promise.resolve();
 
-  return (context, next) => {
+  const middleware = (context, next) => {
     if (!context.chatMember && !context.channelPost && !context.editedChannelPost) {
       return next();
     }
@@ -12,6 +12,8 @@ function createOrderedChannelUpdatesMiddleware() {
     queue = operation.catch(() => {});
     return operation;
   };
+  middleware.drain = () => queue;
+  return middleware;
 }
 
 module.exports = createOrderedChannelUpdatesMiddleware;

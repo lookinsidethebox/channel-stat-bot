@@ -27,6 +27,10 @@ function loadConfig(env = process.env) {
     if (!config.sourceStatistics) throw new Error('TELEGRAM_ADS_API_TOKEN requires SOURCE_STATS_ENABLED=1.');
     config.adsStatistics = { token: env.TELEGRAM_ADS_API_TOKEN.trim(), channelId };
   }
+  if (env.DAILY_SUMMARY_ENABLED === '1' && !config.sourceStatistics) {
+    throw new Error('DAILY_SUMMARY_ENABLED requires SOURCE_STATS_ENABLED=1 and an authorized Telegram user session.');
+  }
+  if (config.sourceStatistics) config.dailySummary = env.DAILY_SUMMARY_ENABLED !== '0';
   return config;
 }
 

@@ -14,16 +14,21 @@ const { createTelegramAdsReader } = require('./services/telegram-ads.service');
 const { createAdsStatisticsStore } = require('./storage/ads-statistics.store');
 const { createAdsStatisticsMonitor } = require('./services/ads-statistics-monitor.service');
 const { createMemberNotifier } = require('./services/member-notification.service');
+const { createDailySummaryStore } = require('./storage/daily-summary.store');
+const { createDailySummaryMonitor } = require('./services/daily-summary-monitor.service');
 
-function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig }, {
+function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
   memberStore = createMemberStore(),
   statisticsStore = createSourceStatisticsStore(channelId),
   statisticsReader,
   adsStatisticsStore = createAdsStatisticsStore(channelId),
   adsStatisticsReader,
+  dailySummaryStore = createDailySummaryStore(channelId),
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
+  const orderedUpdates = createOrderedChannelUpdatesMiddleware();
+  const channelStatisticsReader = statisticsConfig && (statisticsReader || createTelegramStatisticsReader(statisticsConfig));
   const notifications = createMemberNotifier({
     memberStore, channelId, logger,
     sendMessage: message => bot.telegram.sendMessage(ownerId, message, { link_preview_options: { is_disabled: true } }),
@@ -38,13 +43,25 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   }
   if (statisticsConfig) {
     bot.sourceStatistics = createSourceStatisticsMonitor({
-      reader: statisticsReader || createTelegramStatisticsReader(statisticsConfig),
+      reader: channelStatisticsReader,
       statisticsStore, memberStore, logger,
       onChecked: notifications.sendPending,
     });
   }
 
-  bot.use(createOrderedChannelUpdatesMiddleware());
+  if (dailySummary) {
+    if (!channelStatisticsReader) throw new Error('DAILY_SUMMARY_REQUIRES_USER_SESSION');
+    bot.dailySummary = createDailySummaryMonitor({
+      reader: { fetch: options => channelStatisticsReader.fetchPosts(options) },
+      summaryStore: dailySummaryStore, memberStore, logger,
+      beforeReport: orderedUpdates.drain,
+      sendMessage: text => bot.telegram.sendMessage(ownerId, text, {
+        parse_mode: 'HTML', link_preview_options: { is_disabled: true },
+      }),
+    });
+  }
+
+  bot.use(orderedUpdates);
   if (debugMemberUpdates) {
     bot.use(createDebugMemberUpdatesMiddleware({ channelId, logger }));
   }
