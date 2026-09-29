@@ -1,12 +1,16 @@
 const { membershipKey } = require('./source-statistics.service');
 
-function createAdsStatisticsMonitor({ reader, statisticsStore, memberStore, onResolved = async () => {}, logger = console, retryMs = 30000 }) {
+function createAdsStatisticsMonitor({ reader, statisticsStore, memberStore, onResolved = async () => {}, onChecked = async () => {}, logger = console, retryMs = 30000 }) {
   let queue = Promise.resolve();
   let timer;
   let retryAt = 0;
   let stopping = false;
   function serialized(action) {
-    const operation = queue.then(action);
+    const operation = queue.then(async () => {
+      const result = await action();
+      await onChecked();
+      return result;
+    });
     queue = operation.catch(() => {});
     return operation;
   }

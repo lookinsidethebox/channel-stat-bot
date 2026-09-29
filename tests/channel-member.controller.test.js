@@ -8,6 +8,7 @@ const ownerId = 'test-owner-id';
 function registerHandler(options = {}) {
   let handler;
   const recordedEvents = [];
+  let notificationChecks = 0;
 
   registerChannelMemberController({
     on(type, callback) {
@@ -18,12 +19,14 @@ function registerHandler(options = {}) {
     channelId,
     ownerId,
     recordMemberEvent: async (event) => recordedEvents.push(event),
+    getMemberAtRemoval: async () => undefined,
+    notifyJoins: async () => { notificationChecks++; },
     fetchPost: async () => null,
     logger: { log() {}, error() {} },
     ...options,
   });
 
-  return { handler, recordedEvents };
+  return { handler, recordedEvents, notificationChecks: () => notificationChecks };
 }
 
 function createContext({
@@ -61,8 +64,8 @@ function createContext({
   };
 }
 
-test('notifies the owner when a bot joins the configured channel', async () => {
-  const { handler, recordedEvents } = registerHandler();
+test('queues a single final notification when a bot joins the configured channel', async () => {
+  const { handler, recordedEvents, notificationChecks } = registerHandler();
   const { context, sentMessages } = createContext({
     oldStatus: 'left',
     newStatus: 'member',
@@ -71,12 +74,9 @@ test('notifies the owner when a bot joins the configured channel', async () => {
 
   await handler(context);
 
-  assert.equal(sentMessages.length, 1);
-  assert.equal(sentMessages[0][0], ownerId);
-  assert.match(sentMessages[0][1], /добавлен в канал/);
-  assert.match(sentMessages[0][1], /test-campaign/);
-  assert.match(sentMessages[0][1], /Test/);
-  assert.match(sentMessages[0][1], /345/);
+  assert.equal(sentMessages.length, 0);
+  assert.equal(notificationChecks(), 1);
+  assert.equal(recordedEvents[0].joinNotification.status, 'pending');
   assert.deepEqual(recordedEvents[0].source, { type: 'invite_link', name: 'test-campaign' });
 });
 
@@ -90,7 +90,7 @@ test('notifies the owner when a channel member leaves', async () => {
   await handler(context);
 
   assert.equal(sentMessages.length, 1);
-  assert.match(sentMessages[0][1], /покинул канал/);
+  assert.equal(sentMessages[0][1], '👎 Подписчик покинул канал! Да и хуй с ним.\n\nИмя: Test');
   assert.equal(recordedEvents[0].source, null);
 });
 
@@ -195,7 +195,7 @@ test('fetches a post using the event time before saving the membership', async (
   ]);
 });
 
-test('preserves the membership event and reports a post lookup failure', async () => {
+test('preserves post lookup errors in the event without adding technical details to the leave message', async () => {
   const events = [];
   const { handler } = registerHandler({
     fetchPost: async () => { throw new Error('Telegram unavailable'); },
@@ -206,22 +206,23 @@ test('preserves the membership event and reports a post lookup failure', async (
   assert.equal(events[0][0].action, 'left');
   assert.equal(events[0][0].postLookupError, 'Telegram unavailable');
   assert.equal(events[0][1], null);
-  assert.match(sentMessages[0][1], /Пост не получен: Telegram unavailable/);
+  assert.equal(sentMessages[0][1], '👎 Подписчик покинул канал! Да и хуй с ним.\n\nИмя: Test');
 });
 
-test('a saved join checks statistics and uses the resolved source in its notification', async () => {
+test('a saved join checks statistics before attempting the final notification', async () => {
   const calls = [];
   const { handler } = registerHandler({
     recordMemberEvent: async event => { calls.push('save'); assert.equal(event.sourceLookup.status, 'pending'); return true; },
     sourceStatistics: { checkJoin: async () => { calls.push('statistics'); return { source: { type: 'ads', name: null, attribution: 'statistics_delta' }, sourceLookup: { status: 'matched' } }; } },
+    notifyJoins: async () => { calls.push('notify'); },
   });
   const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
   await handler(context);
-  assert.deepEqual(calls, ['save', 'statistics']);
-  assert.match(sentMessages[0][1], /Ads \(по изменению статистики\)/);
+  assert.deepEqual(calls, ['save', 'statistics', 'notify']);
+  assert.equal(sentMessages.length, 0);
 });
 
-test('checks the ad campaign after resolving Ads and includes it in the first notification', async () => {
+test('checks both the source and campaign before attempting the final notification', async () => {
   const calls = [];
   const { handler } = registerHandler({
     recordMemberEvent: async event => {
@@ -237,12 +238,12 @@ test('checks the ad campaign after resolving Ads and includes it in the first no
       calls.push('ads');
       return { campaign: { adId: 46, title: 'Любовные романы' } };
     } },
+    notifyJoins: async () => { calls.push('notify'); },
   });
   const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
   await handler(context);
-  assert.deepEqual(calls, ['save', 'source', 'ads']);
-  assert.match(sentMessages[0][1], /Ads \(по изменению статистики\)/);
-  assert.match(sentMessages[0][1], /Любовные романы.*ID 46/);
+  assert.deepEqual(calls, ['save', 'source', 'ads', 'notify']);
+  assert.equal(sentMessages.length, 0);
 });
 
 test('duplicate and departure updates do not query Ads', async () => {

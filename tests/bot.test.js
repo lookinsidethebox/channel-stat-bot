@@ -31,6 +31,7 @@ function createHarness(memberStore, postResponses = []) {
       return { invite_link: 'https://t.me/+test-invite' };
     },
   };
+  bot.telegram.sendMessage = bot.context.telegram.sendMessage;
   return { bot, sentMessages, createdLinks, errors, postRequests };
 }
 
@@ -58,7 +59,7 @@ test('the assembled bot restricts text and link commands to the owner', async ()
   assert.equal(createdLinks.length, 0);
 
   await bot.handleUpdate(textUpdate(123, '/start'));
-  assert.equal(sentMessages[0][1], 'Hello, world!');
+  assert.equal(sentMessages[0][1], '✅ Бот работает');
   await bot.handleUpdate(textUpdate(123, '/link@test_bot campaign'));
   assert.deepEqual(createdLinks, [[config.channelId, { name: 'campaign' }]]);
   assert.equal(sentMessages.length, 2);
@@ -140,4 +141,66 @@ test('routes handler failures to the common error logger and keeps processing th
   assert.equal(errors.length, 1);
   assert.equal(errors[0][1], error);
   assert.deepEqual(sentMessages, []);
+});
+
+test('leave notifications use only the latest subscription period after a restart and are not duplicated', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-stat-bot-leave-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'members.json');
+  const store = createMemberStore(filePath);
+  const user = { id: 345, name: 'Старое имя', username: 'old_username' };
+  const firstAddedAt = '2026-09-01T10:00:00.000Z';
+  const addedAt = '2026-09-26T10:00:00.000Z';
+  const removedAt = '2026-09-29T12:00:00.000Z';
+  const chat = { id: Number(config.channelId), type: 'channel', username: 'example_channel' };
+  for (const [time, title, messageId] of [[firstAddedAt, 'Старая кампания', 10], [addedAt, 'Новая кампания', 20]]) {
+    await store.recordMemberEvent({ action: 'joined', occurredAt: time, user,
+      source: { type: 'ads' }, campaignLookup: { status: 'pending' },
+    }, { messageId, postedAt: time, preview: `Пост ${messageId}` });
+    await store.resolveMemberCampaign({ userId: user.id, addedAt: time, status: 'matched', checkedAt: time,
+      campaign: { adId: messageId, title },
+    });
+    if (time === firstAddedAt) {
+      await store.recordMemberEvent({ action: 'left', occurredAt: '2026-09-20T10:00:00.000Z', user });
+    }
+  }
+  const { bot, sentMessages, errors } = createHarness(createMemberStore(filePath), [[{
+    chat, message_id: 30, date: Date.parse(removedAt) / 1000, text: 'Пост при отписке',
+  }]]);
+  const currentUser = { id: user.id, is_bot: false, first_name: 'Анна', last_name: 'Иванова', username: 'anna' };
+  const update = { update_id: 1, chat_member: { chat, from: currentUser, date: Date.parse(removedAt) / 1000,
+    old_chat_member: { user: currentUser, status: 'member' }, new_chat_member: { user: currentUser, status: 'left' },
+  } };
+  await bot.handleUpdate(update);
+  await bot.handleUpdate(update);
+  assert.deepEqual(sentMessages, [[config.ownerId, [
+    '👎 Подписчик покинул канал! Да и хуй с ним.', '', 'Имя: Анна Иванова (@anna)',
+    'Источник: Ads (Новая кампания)',
+    'С какого поста подписался: Пост 20 https://t.me/example_channel/20',
+    'Сколько дней провел на канале: 3',
+  ].join('\n'), { link_preview_options: { is_disabled: true } }]]);
+  const { members } = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(members.length, 2);
+  assert.equal(members[1].removedAt, removedAt);
+  assert.equal(members[1].postAtRemoval.preview, 'Пост при отписке');
+  assert.deepEqual(errors, []);
+});
+
+test('an untracked departure has no history lines, even when older closed periods exist', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-stat-bot-orphan-leave-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = createMemberStore(path.join(directory, 'members.json'));
+  const user = { id: 345, name: 'Анна', username: null };
+  await store.recordMemberEvent({ action: 'joined', occurredAt: '2026-09-01T10:00:00.000Z', user, source: { type: 'url' } });
+  await store.recordMemberEvent({ action: 'left', occurredAt: '2026-09-02T10:00:00.000Z', user });
+  const { bot, sentMessages, errors } = createHarness(store);
+  const telegramUser = { id: 345, first_name: 'Анна', is_bot: false };
+  await bot.handleUpdate({ update_id: 1, chat_member: {
+    chat: { id: Number(config.channelId), type: 'channel' }, from: telegramUser,
+    date: Date.parse('2026-09-29T10:00:00.000Z') / 1000,
+    old_chat_member: { user: telegramUser, status: 'member' }, new_chat_member: { user: telegramUser, status: 'left' },
+  } });
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0][1], '👎 Подписчик покинул канал! Да и хуй с ним.\n\nИмя: Анна');
+  assert.deepEqual(errors, []);
 });

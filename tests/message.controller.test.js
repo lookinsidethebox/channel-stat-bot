@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const registerMessageController = require('../src/controllers/message.controller');
 
-test('replies Hello, world! to text messages and commands', async () => {
+test('replies with the bot status to text messages and commands', async () => {
   let registeredType;
   let textHandler;
 
@@ -22,6 +22,6 @@ test('replies Hello, world! to text messages and commands', async () => {
       reply: async (message) => replies.push(message),
     });
 
-    assert.deepEqual(replies, ['Hello, world!']);
+    assert.deepEqual(replies, ['✅ Бот работает']);
   }
 });

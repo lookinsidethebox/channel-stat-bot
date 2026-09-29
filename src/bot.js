@@ -13,6 +13,7 @@ const { createTelegramStatisticsReader } = require('./services/telegram-statisti
 const { createTelegramAdsReader } = require('./services/telegram-ads.service');
 const { createAdsStatisticsStore } = require('./storage/ads-statistics.store');
 const { createAdsStatisticsMonitor } = require('./services/ads-statistics-monitor.service');
+const { createMemberNotifier } = require('./services/member-notification.service');
 
 function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig }, {
   memberStore = createMemberStore(),
@@ -23,24 +24,23 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
+  const notifications = createMemberNotifier({
+    memberStore, channelId, logger,
+    sendMessage: message => bot.telegram.sendMessage(ownerId, message, { link_preview_options: { is_disabled: true } }),
+  });
+  bot.memberNotifications = notifications;
   if (adsConfig) {
     bot.adsStatistics = createAdsStatisticsMonitor({
       reader: adsStatisticsReader || createTelegramAdsReader({ ...adsConfig, getChannel: () => bot.telegram.getChat(channelId) }),
       statisticsStore: adsStatisticsStore, memberStore, logger,
-      onResolved: async member => {
-        const name = member.username ? `@${member.username}` : member.name || `ID ${member.userId}`;
-        await bot.telegram.sendMessage(ownerId, `Уточнена реклама для ${name} (${member.userId}).${registerChannelMemberController.describeCampaign(member.campaign)}`);
-      },
+      onChecked: notifications.sendPending,
     });
   }
   if (statisticsConfig) {
     bot.sourceStatistics = createSourceStatisticsMonitor({
       reader: statisticsReader || createTelegramStatisticsReader(statisticsConfig),
       statisticsStore, memberStore, logger,
-      onResolved: async member => {
-        const name = member.username ? `@${member.username}` : member.name || `ID ${member.userId}`;
-        await bot.telegram.sendMessage(ownerId, `Уточнён источник для ${name} (${member.userId}): ${registerChannelMemberController.describeSource(member.source)}.`);
-      },
+      onChecked: notifications.sendPending,
     });
   }
 
@@ -53,6 +53,8 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     channelId,
     ownerId,
     recordMemberEvent: memberStore.recordMemberEvent,
+    getMemberAtRemoval: memberStore.getMemberAtRemoval,
+    notifyJoins: notifications.sendPending,
     sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics,
     logger,

@@ -113,6 +113,7 @@ function createMemberStore(filePath = defaultFilePath) {
         returned: joined && Boolean(previous),
         ...(joined && event.sourceLookup ? { sourceLookup: event.sourceLookup } : {}),
         ...(joined && event.campaignLookup ? { campaignLookup: event.campaignLookup } : {}),
+        ...(joined && event.joinNotification ? { joinNotification: event.joinNotification } : {}),
         ...(event.postLookupError ? {
           [joined ? 'postAtAdditionError' : 'postAtRemovalError']: event.postLookupError,
         } : {}),
@@ -131,6 +132,21 @@ function createMemberStore(filePath = defaultFilePath) {
     await writeQueue;
     const data = await readMemberData(filePath);
     return data.members.find(member => String(member.userId) === String(userId) && member.addedAt === addedAt);
+  }
+
+  async function getMemberAtRemoval(userId, removedAt) {
+    await writeQueue;
+    const data = await readMemberData(filePath);
+    return data.members.findLast(member => String(member.userId) === String(userId) && member.removedAt === removedAt);
+  }
+
+  async function getMemberHistory(userId, addedAt) {
+    await writeQueue;
+    const { members } = await readMemberData(filePath);
+    const currentIndex = members.findIndex(member => String(member.userId) === String(userId) && member.addedAt === addedAt);
+    if (currentIndex < 0) return [];
+    // Stop at this particular arrival, even if newer periods were saved while its lookup was pending.
+    return members.slice(0, currentIndex).filter(member => String(member.userId) === String(userId));
   }
 
   function resolveMemberSource(decision) {
@@ -169,8 +185,41 @@ function createMemberStore(filePath = defaultFilePath) {
     });
   }
 
-  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember,
-    getPendingCampaignLookups, resolveMemberCampaign };
+  async function getPendingJoinNotifications() {
+    await writeQueue;
+    return (await readMemberData(filePath)).members.filter(member => member.joinNotification?.status === 'pending');
+  }
+
+  function prepareJoinNotification(userId, addedAt, messages) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
+      if (!member || member.joinNotification?.status !== 'pending' || member.joinNotification.messages) return false;
+      member.joinNotification = { status: 'pending', messages, sentCount: 0 };
+      return true;
+    });
+  }
+
+  function markJoinNotificationPartSent(userId, addedAt, sentCount) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
+      if (!member || member.joinNotification?.status !== 'pending') return false;
+      member.joinNotification.sentCount = sentCount;
+      return true;
+    });
+  }
+
+  function markJoinNotified(userId, addedAt) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
+      if (!member || member.joinNotification?.status !== 'pending') return false;
+      member.joinNotification = { status: 'sent', sentAt: new Date().toISOString() };
+      return true;
+    });
+  }
+
+  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember, getMemberAtRemoval,
+    getMemberHistory, getPendingCampaignLookups, resolveMemberCampaign, getPendingJoinNotifications,
+    prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }
 
 module.exports = { createMemberStore };

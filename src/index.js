@@ -25,6 +25,7 @@ async function main() {
   try {
     await bot.adsStatistics?.start();
     await bot.sourceStatistics?.start();
+    await bot.memberNotifications.sendPending();
     await bot.launch({
       allowedUpdates: ['message', 'chat_member', 'channel_post', 'edited_channel_post'],
     }, () => {
