@@ -5,7 +5,7 @@ async function buildDailyReport({ channelId, reader, memberStore, beforeReport =
   if (snapshot.channelId !== channelId) throw new Error('DAILY_SUMMARY_CHANNEL_MISMATCH');
   await beforeReport();
   const membership = await memberStore.countEvents(window.periodStart, window.periodEnd);
-  return { ...window, kind: 'calendar_day', channelId, membership, fetchedAt: snapshot.fetchedAt,
+  return { ...window, kind: 'calendar_totals', channelId, membership, fetchedAt: snapshot.fetchedAt,
     posts: snapshot.posts, previousPosts: snapshot.previousPosts };
 }
 
@@ -16,7 +16,7 @@ function createStatsReporter({ channelId, reader, summaryStore, memberStore, bef
     const state = await summaryStore.getState();
     if (state.channelId !== channelId) throw new Error('DAILY_SUMMARY_CHANNEL_MISMATCH');
     const saved = state.reports[window.date];
-    if (saved?.kind === 'calendar_day' && saved.periodStart === window.periodStart && saved.periodEnd === window.periodEnd) {
+    if (saved?.kind === 'calendar_totals' && saved.periodStart === window.periodStart && saved.periodEnd === window.periodEnd) {
       return formatDailySummary(saved);
     }
 

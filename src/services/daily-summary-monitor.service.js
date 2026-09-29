@@ -30,7 +30,8 @@ function createDailySummaryMonitor({ reader, summaryStore, memberStore, sendMess
       await sendPending();
       const state = await summaryStore.getState();
       const window = dueReportWindow(now());
-      if (window.sendAt < state.initializedAt || state.reports[window.date]) return;
+      if (window.sendAt < state.initializedAt || state.reports[window.date]
+        || state.legacyActivityReports?.[window.date]?.status === 'sent') return;
       const report = await buildDailyReport({ window, channelId: state.channelId, reader, memberStore, beforeReport });
       report.text = formatDailySummary(report);
       await summaryStore.prepare(report);

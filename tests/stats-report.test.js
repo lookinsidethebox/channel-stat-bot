@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { mkdtemp, rm, readFile } = require('node:fs/promises');
+const { mkdtemp, rm, readFile, writeFile } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { createStatsReporter } = require('../src/services/stats-report.service');
@@ -29,7 +29,7 @@ async function setup(t, instant = '2026-09-29T12:00:00.000Z') {
   return { options, summaryStore, memberStore, filePath, requests };
 }
 
-test('stats queries historical daily counts even before the first report without displaying current counters or writing an outbox', async t => {
+test('stats queries historical cumulative counts even before the first report without displaying current counters or writing an outbox', async t => {
   const h = await setup(t);
   const user = { id: 1, name: 'Test', username: null };
   await h.memberStore.recordMemberEvent({ action: 'joined', occurredAt: '2026-09-28T00:00:00.000Z', user });
@@ -38,10 +38,10 @@ test('stats queries historical daily counts even before the first report without
   const getStats = createStatsReporter(h.options);
   const text = await getStats();
   assert.match(text, /<b>📈 Статистика за 28\.09\.2026<\/b>/);
-  assert.match(text, /<b>Пользователей добавилось на канал:<\/b> 1\n<b>Пользователей отписалось:<\/b> 1/);
+  assert.match(text, /Пользователей добавилось на канал: <b>1<\/b>\nПользователей отписалось: <b>1<\/b>/);
   assert.doesNotMatch(text, /Период:|Счётчики на|Подгорица|11:00/);
   assert.match(text, /<b>Пост:<\/b> &lt;Пост&gt; https:\/\/t\.me\/c\/1234567890\/30/);
-  assert.match(text, /<b>Количество просмотров:<\/b> 100 \(\+30\)/);
+  assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
   assert.deepEqual(h.requests, [reportWindow(h.options.now())]);
   assert.equal(await getStats(), text);
   await assert.rejects(readFile(h.filePath), { code: 'ENOENT' });
@@ -50,9 +50,9 @@ test('stats queries historical daily counts even before the first report without
 test('stats reuses an existing pending or sent report and its original daily deltas without changing delivery state', async t => {
   const h = await setup(t);
   await h.summaryStore.initialize('2026-09-27T12:00:00.000Z');
-  const yesterday = { ...reportWindow(new Date('2026-09-28T12:00:00.000Z')), channelId, kind: 'calendar_day',
+  const yesterday = { ...reportWindow(new Date('2026-09-28T12:00:00.000Z')), channelId, kind: 'calendar_totals',
     membership: { joined: 0, left: 0 }, posts: [{ ...posts[0], views: 9999, reactions: 999, forwards: 99 }] };
-  const today = { ...reportWindow(h.options.now()), channelId, kind: 'calendar_day', membership: { joined: 7, left: 2 }, posts, previousPosts };
+  const today = { ...reportWindow(h.options.now()), channelId, kind: 'calendar_totals', membership: { joined: 7, left: 2 }, posts, previousPosts };
   for (const report of [yesterday, today]) {
     await h.summaryStore.prepare({ ...report, text: formatDailySummary(report) });
   }
@@ -63,14 +63,28 @@ test('stats reuses an existing pending or sent report and its original daily del
     if (status === 'sent') await h.summaryStore.markSent(today.date, h.options.now().toISOString());
     const before = await readFile(h.filePath, 'utf8');
     const text = await getStats();
-    assert.match(text, /<b>Пользователей добавилось на канал:<\/b> 7\n<b>Пользователей отписалось:<\/b> 2/);
-    assert.match(text, /<b>Количество просмотров:<\/b> 100 \(\+30\)/);
-    assert.match(text, /<b>Количество реакций:<\/b> 5 \(-1\)/);
-    assert.match(text, /<b>Количество репостов:<\/b> 2 \(\+2\)/);
+    assert.match(text, /Пользователей добавилось на канал: <b>7<\/b>\nПользователей отписалось: <b>2<\/b>/);
+    assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
+    assert.match(text, /Количество реакций: <b>5 \(-1\)<\/b>/);
+    assert.match(text, /Количество репостов: <b>2 \(\+2\)<\/b>/);
     assert.doesNotMatch(text, /Счётчики на/);
     assert.equal(await readFile(h.filePath, 'utf8'), before);
   }
   assert.deepEqual(h.requests, []);
+});
+
+test('stats rebuilds a legacy daily-activity report without changing its delivery history', async t => {
+  const h = await setup(t);
+  const report = { ...reportWindow(h.options.now()), kind: 'calendar_day', channelId, posts,
+    status: 'sent', text: 'Old daily activity comparison' };
+  const raw = JSON.stringify({ version: 2, channelId, initializedAt: '2026-09-27T12:00:00.000Z',
+    reports: { [report.date]: report } });
+  await writeFile(h.filePath, raw);
+  const text = await createStatsReporter(h.options)();
+  assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
+  assert.doesNotMatch(text, /Old daily activity/);
+  assert.equal(h.requests.length, 1);
+  assert.equal(await readFile(h.filePath, 'utf8'), raw);
 });
 
 test('stats before 11:00 already selects yesterday, including a daylight-saving transition', async t => {

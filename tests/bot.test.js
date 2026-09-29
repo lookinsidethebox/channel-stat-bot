@@ -238,7 +238,7 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], config.ownerId);
   assert.match(sent[0][1], /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
-  assert.match(sent[0][1], /<b>Пользователей добавилось на канал:<\/b> 3/);
+  assert.match(sent[0][1], /Пользователей добавилось на канал: <b>3<\/b>/);
   assert.match(sent[0][1], /<b>Пост:<\/b> &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
   assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
   assert.deepEqual(errors, []);
@@ -274,7 +274,7 @@ test('stats is owner-only, accepts an addressed command and works with scheduled
   for (const [recipient, text, extra] of replies) {
     assert.equal(String(recipient), config.ownerId);
     assert.match(text, /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
-    assert.match(text, /<b>Пользователей добавилось на канал:<\/b> 3/);
+    assert.match(text, /Пользователей добавилось на канал: <b>3<\/b>/);
     assert.equal(extra.parse_mode, 'HTML');
     assert.deepEqual(extra.link_preview_options, { is_disabled: true });
   }

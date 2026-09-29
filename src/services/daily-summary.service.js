@@ -56,25 +56,25 @@ const escapeHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<
 function formatCounter(value, previous, isNew) {
   if (value == null) return 'нет данных';
   const baseline = previous ?? (isNew ? 0 : null);
-  if (baseline === null) return `${value} (нет данных за вчера)`;
+  if (baseline === null) return `<b>${value}</b> (нет данных за вчера)`;
   const delta = value - baseline;
-  return `${value} (${delta > 0 ? '+' : ''}${delta})`;
+  return `<b>${value} (${delta > 0 ? '+' : ''}${delta})</b>`;
 }
 
 function formatDailySummary({ date, membership, posts, periodStart, channelId, previousPosts = [] }) {
   const displayDate = date.split('-').reverse().join('.');
   const lines = [`<b>📈 Статистика за ${escapeHtml(displayDate)}</b>`, '',
-    `<b>Пользователей добавилось на канал:</b> ${membership.joined}`,
-    `<b>Пользователей отписалось:</b> ${membership.left}`, '',
+    `Пользователей добавилось на канал: <b>${membership.joined}</b>`,
+    `Пользователей отписалось: <b>${membership.left}</b>`, '',
     '<b>Информация по трем последним постам</b>'];
   for (const post of posts) {
     const previous = previousPosts.find(entry => entry.messageId === post.messageId);
     const isNew = Date.parse(post.postedAt) >= Date.parse(periodStart);
     const link = `https://t.me/c/${-Number(channelId) - 1000000000000}/${post.messageId}`;
     lines.push('', `<b>Пост:</b> ${escapeHtml(post.preview || 'Пост без текста')} ${link}`,
-      `<b>Количество просмотров:</b> ${formatCounter(post.views, previous?.views, isNew)}`,
-      `<b>Количество реакций:</b> ${formatCounter(post.reactions, previous?.reactions, isNew)}`,
-      `<b>Количество репостов:</b> ${formatCounter(post.forwards, previous?.forwards, isNew)}`);
+      `Количество просмотров: ${formatCounter(post.views, previous?.views, isNew)}`,
+      `Количество реакций: ${formatCounter(post.reactions, previous?.reactions, isNew)}`,
+      `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew)}`);
   }
   if (!posts.length) lines.push('', 'На канале пока нет постов.');
   return lines.join('\n');

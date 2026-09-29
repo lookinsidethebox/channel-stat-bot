@@ -48,14 +48,13 @@ function countPeriod(graph, names, start, end, postedAt, total, coverage = graph
   return totalForPeriod;
 }
 
-function dailyPostCounters(post, viewsGraph, reactionsGraph, { periodStart, periodEnd, previousPeriodStart }) {
+function dailyPostCounters(post, viewsGraph, reactionsGraph, { periodStart, periodEnd }) {
   const views = parseGraph(viewsGraph);
   const reactions = parseGraph(reactionsGraph);
   const start = Date.parse(periodStart);
   const end = Date.parse(periodEnd);
-  const previousStart = Date.parse(previousPeriodStart);
   const postedAt = Date.parse(post.postedAt);
-  if (![start, end, previousStart, postedAt].every(Number.isFinite) || previousStart >= start || start >= end) {
+  if (![start, end, postedAt].every(Number.isFinite) || start >= end) {
     throw new Error('POST_DAILY_INVALID_PERIOD');
   }
   function counters(from, to) {
@@ -65,7 +64,9 @@ function dailyPostCounters(post, viewsGraph, reactionsGraph, { periodStart, peri
       forwards: countPeriod(views, ['Shares'], from, to, postedAt, post.forwards),
     };
   }
-  return { current: counters(start, end), previous: counters(previousStart, start) };
+  // Both snapshots are cumulative from publication. Their difference is the
+  // growth during the report day, not a comparison of two daily activity counts.
+  return { current: counters(0, end), previous: counters(0, start) };
 }
 
 async function fetchDailyPostStatistics(client, inputChannel, options, statsDc) {

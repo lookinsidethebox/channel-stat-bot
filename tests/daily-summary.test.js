@@ -37,14 +37,14 @@ test('statistics days stay in UTC while delivery stays at 11:00 Podgorica across
 test('the summary uses bold headings, escaped previews and honest positive, negative and missing deltas', () => {
   const text = formatDailySummary({ ...summary, previousPosts: [{ messageId: 20, views: 300, reactions: 11, forwards: 5 }] });
   assert.equal(text, [
-    '<b>📈 Статистика за 28.09.2026</b>', '', '<b>Пользователей добавилось на канал:</b> 7', '<b>Пользователей отписалось:</b> 2', '',
+    '<b>📈 Статистика за 28.09.2026</b>', '', 'Пользователей добавилось на канал: <b>7</b>', 'Пользователей отписалось: <b>2</b>', '',
     '<b>Информация по трем последним постам</b>', '',
     '<b>Пост:</b> Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
-    '<b>Количество просмотров:</b> 100 (+100)', '<b>Количество реакций:</b> 5 (+5)', '<b>Количество репостов:</b> 2 (+2)', '',
+    'Количество просмотров: <b>100 (+100)</b>', 'Количество реакций: <b>5 (+5)</b>', 'Количество репостов: <b>2 (+2)</b>', '',
     '<b>Пост:</b> Вчерашний пост https://t.me/c/1234567890/20',
-    '<b>Количество просмотров:</b> 350 (+50)', '<b>Количество реакций:</b> 9 (-2)', '<b>Количество репостов:</b> 5 (0)', '',
+    'Количество просмотров: <b>350 (+50)</b>', 'Количество реакций: <b>9 (-2)</b>', 'Количество репостов: <b>5 (0)</b>', '',
     '<b>Пост:</b> Пост без текста https://t.me/c/1234567890/10',
-    '<b>Количество просмотров:</b> нет данных', '<b>Количество реакций:</b> 0 (нет данных за вчера)', '<b>Количество репостов:</b> 0 (нет данных за вчера)',
+    'Количество просмотров: нет данных', 'Количество реакций: <b>0</b> (нет данных за вчера)', 'Количество репостов: <b>0</b> (нет данных за вчера)',
   ].join('\n'));
   assert.ok(formatDailySummary({ ...summary, posts: [] }).endsWith('На канале пока нет постов.'));
 });
@@ -116,7 +116,7 @@ test('first activation does not send a stale report and each later day sends onc
   h.setPosts(summary.posts.map(post => ({ ...post, views: 450, reactions: 10, forwards: 7 })));
   await monitor.checkPending();
   assert.equal(h.messages.length, 2);
-  assert.ok(h.messages[1].includes('<b>Количество просмотров:</b> 450 (+350)'));
+  assert.ok(h.messages[1].includes('Количество просмотров: <b>450 (+350)</b>'));
 });
 
 test('waits for queued channel updates before counting membership events', async t => {
@@ -125,7 +125,7 @@ test('waits for queued channel updates before counting membership events', async
     user: { id: 1, name: 'Test', username: null }, source: { type: 'url' } }));
   h.setTime('2026-09-29T09:00:00Z');
   await h.monitor().checkPending();
-  assert.ok(h.messages[0].includes('<b>Пользователей добавилось на канал:</b> 1'));
+  assert.ok(h.messages[0].includes('Пользователей добавилось на канал: <b>1</b>'));
 });
 
 test('the running timer fires at 11:00, schedules the next check and stops without further sends', async t => {
@@ -202,7 +202,7 @@ test('request failures respect FLOOD_WAIT and do not persist fabricated zero cou
   assert.equal(h.messages.length, 1);
 });
 
-test('after missed deliveries the latest calendar day uses historical API counts for both comparison days', async t => {
+test('after missed deliveries the latest calendar day uses historical API totals at both day boundaries', async t => {
   const h = await harness(t);
   const monitor = h.monitor();
   h.setTime('2026-09-29T09:00:00Z');
@@ -233,7 +233,7 @@ test('legacy 11:00 reports are preserved separately and never replayed or reused
     reports: { '2026-09-28': legacy } }));
   const raw = await readFile(h.filePath, 'utf8');
   const migrated = await h.store.getState();
-  assert.equal(migrated.version, 2);
+  assert.equal(migrated.version, 3);
   assert.deepEqual(migrated.reports, {});
   assert.equal(await readFile(h.filePath, 'utf8'), raw);
   h.setTime('2026-09-29T09:00:00.000Z');
@@ -242,6 +242,35 @@ test('legacy 11:00 reports are preserved separately and never replayed or reused
   assert.match(h.messages[0], /Статистика за 28\.09\.2026/);
   const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
   assert.deepEqual(saved.legacyReports['2026-09-28'], legacy);
-  assert.equal(saved.reports['2026-09-28'].kind, 'calendar_day');
+  assert.equal(saved.reports['2026-09-28'].kind, 'calendar_totals');
   assert.equal(saved.reports['2026-09-28'].periodEnd, '2026-09-29T00:00:00.000Z');
 });
+
+for (const status of ['pending', 'sent']) {
+  test(`legacy daily-activity reports are archived; ${status === 'sent' ? 'sent reports are not delivered twice' : 'pending reports are rebuilt'}`, async t => {
+    const h = await harness(t);
+    const legacy = { ...calendarWindow('2026-09-28'), kind: 'calendar_day',
+      posts: summary.posts, text: 'Old daily activity comparison', status };
+    const legacyReports = { '2026-09-27': { text: 'Older 11:00 report' } };
+    await writeFile(h.filePath, JSON.stringify({ version: 2, channelId, initializedAt: '2026-09-28T10:00:00.000Z',
+      legacyReports, reports: { [legacy.date]: legacy } }));
+    h.setTime('2026-09-29T09:00:00.000Z');
+    await h.monitor().checkPending();
+    assert.equal(h.messages.length, status === 'sent' ? 0 : 1);
+    assert.equal(h.requests(), status === 'sent' ? 0 : 1);
+    assert.ok(h.messages.every(text => !text.includes('Old daily activity')));
+    if (status === 'pending') {
+      assert.match(h.messages[0], /Количество просмотров: <b>100 \(\+100\)<\/b>/);
+      assert.equal((await h.store.getState()).reports[legacy.date].kind, 'calendar_totals');
+    }
+    h.setTime('2026-09-30T09:00:00.000Z');
+    await h.monitor().checkPending();
+    const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
+    assert.equal(saved.version, 3);
+    assert.deepEqual(saved.legacyReports, legacyReports);
+    assert.deepEqual(saved.legacyActivityReports[legacy.date], legacy);
+    assert.equal(saved.reports['2026-09-29'].kind, 'calendar_totals');
+    assert.equal(saved.reports['2026-09-29'].status, 'sent');
+    assert.equal(h.messages.length, status === 'sent' ? 1 : 2);
+  });
+}

@@ -7,7 +7,7 @@ function createDailySummaryStore(channelId, filePath = path.join(__dirname, '../
   async function read() {
     try {
       const state = JSON.parse(await readFile(filePath, 'utf8'));
-      if (![1, 2].includes(state.version) || state.channelId !== channelId || !Number.isFinite(Date.parse(state.initializedAt))
+      if (![1, 2, 3].includes(state.version) || state.channelId !== channelId || !Number.isFinite(Date.parse(state.initializedAt))
         || !state.reports || typeof state.reports !== 'object' || Array.isArray(state.reports)
         || Object.entries(state.reports).some(([date, report]) => !report || report.date !== date
           || !['pending', 'sent'].includes(report.status) || typeof report.text !== 'string'
@@ -15,10 +15,12 @@ function createDailySummaryStore(channelId, filePath = path.join(__dirname, '../
         throw new Error('DAILY_SUMMARY_INVALID_STATE');
       }
       // Old 11:00–11:00 reports are retained but never used as calendar days.
-      if (state.version === 1) return { ...state, version: 2, legacyReports: state.reports, reports: {} };
+      if (state.version === 1) return { ...state, version: 3, legacyReports: state.reports, legacyActivityReports: {}, reports: {} };
+      // Version 2 compared daily activity; those values are not cumulative totals.
+      if (state.version === 2) return { ...state, version: 3, legacyActivityReports: state.reports, reports: {} };
       return state;
     } catch (error) {
-      if (error.code === 'ENOENT') return { version: 2, channelId, initializedAt: null, reports: {}, legacyReports: {} };
+      if (error.code === 'ENOENT') return { version: 3, channelId, initializedAt: null, reports: {}, legacyReports: {}, legacyActivityReports: {} };
       throw error;
     }
   }
