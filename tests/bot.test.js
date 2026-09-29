@@ -243,3 +243,41 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
   assert.deepEqual(errors, []);
 });
+
+test('stats is owner-only, accepts an addressed command and works with scheduled summaries disabled', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-stat-bot-stats-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const channelId = '-1001234567890';
+  const filePath = path.join(directory, 'summary.json');
+  const replies = [];
+  const errors = [];
+  let reads = 0;
+  const bot = createBot({ ...config, channelId, sourceStatistics: {}, dailySummary: false }, {
+    dailySummaryStore: createDailySummaryStore(channelId, filePath),
+    memberStore: { countEvents: async () => ({ joined: 3, left: 1 }) },
+    statisticsReader: { fetchPosts: async () => {
+      reads++;
+      return { channelId, fetchedAt: new Date().toISOString(), posts: [] };
+    } },
+    logger: { log() {}, error: (...args) => errors.push(args) },
+  });
+  bot.botInfo = { id: 999, username: 'test_bot', first_name: 'Test', is_bot: true };
+  bot.context.telegram = { sendMessage: async (...args) => replies.push(args) };
+  await bot.handleUpdate(textUpdate(456, '/stats'));
+  assert.equal(reads, 0);
+  assert.deepEqual(replies, []);
+  for (const command of ['/stats', '/stats@test_bot']) {
+    await bot.handleUpdate(textUpdate(123, command));
+  }
+  assert.equal(reads, 2);
+  assert.equal(replies.length, 2);
+  for (const [recipient, text, extra] of replies) {
+    assert.equal(String(recipient), config.ownerId);
+    assert.match(text, /<b>📈 Статистика за сутки<\/b>/);
+    assert.match(text, /Пользователей добавилось на канал: 3/);
+    assert.equal(extra.parse_mode, 'HTML');
+    assert.deepEqual(extra.link_preview_options, { is_disabled: true });
+  }
+  await assert.rejects(readFile(filePath), { code: 'ENOENT' });
+  assert.deepEqual(errors, []);
+});

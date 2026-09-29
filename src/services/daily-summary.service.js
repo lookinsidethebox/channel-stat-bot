@@ -36,27 +36,32 @@ function reportWindow(now) {
 
 const escapeHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-function formatCounter(value, previous, isNew) {
+function formatCounter(value, previous, isNew, compareCounters) {
   if (value === null) return 'нет данных';
+  if (!compareCounters) return `${value} (нет данных за период)`;
   const baseline = previous ?? (isNew ? 0 : null);
   if (baseline === null) return `${value} (нет данных за вчера)`;
   const delta = value - baseline;
   return `${value} (${delta > 0 ? '+' : ''}${delta})`;
 }
 
-function formatDailySummary({ membership, posts, periodStart, channelId }, previousPosts = []) {
-  const lines = ['<b>📈 Статистика за сутки</b>', '',
+function formatDailySummary({ membership, posts, periodStart, channelId }, previousPosts = [],
+  { periodLabel, postCountersNote, compareCounters = true } = {}) {
+  const lines = ['<b>📈 Статистика за сутки</b>'];
+  if (periodLabel) lines.push(escapeHtml(periodLabel));
+  lines.push('',
     `Пользователей добавилось на канал: ${membership.joined}`,
     `Пользователей отписалось: ${membership.left}`, '',
-    '<b>Информация по трем последним постам</b>'];
+    '<b>Информация по трем последним постам</b>');
+  if (postCountersNote && posts.length) lines.push(escapeHtml(postCountersNote));
   for (const post of posts) {
     const previous = previousPosts.find(entry => entry.messageId === post.messageId);
     const isNew = Date.parse(post.postedAt) >= Date.parse(periodStart);
     const link = `https://t.me/c/${-Number(channelId) - 1000000000000}/${post.messageId}`;
     lines.push('', `Пост: ${escapeHtml(post.preview || 'Пост без текста')} ${link}`,
-      `Количество просмотров: ${formatCounter(post.views, previous?.views, isNew)}`,
-      `Количество реакций: ${formatCounter(post.reactions, previous?.reactions, isNew)}`,
-      `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew)}`);
+      `Количество просмотров: ${formatCounter(post.views, previous?.views, isNew, compareCounters)}`,
+      `Количество реакций: ${formatCounter(post.reactions, previous?.reactions, isNew, compareCounters)}`,
+      `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew, compareCounters)}`);
   }
   if (!posts.length) lines.push('', 'На канале пока нет постов.');
   return lines.join('\n');

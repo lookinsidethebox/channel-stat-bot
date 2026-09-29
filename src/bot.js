@@ -3,6 +3,7 @@ const registerMessageController = require('./controllers/message.controller');
 const registerChannelMemberController = require('./controllers/channel-member.controller');
 const registerChannelPostController = require('./controllers/channel-post.controller');
 const registerCampaignLinkController = require('./controllers/campaign-link.controller');
+const registerStatsController = require('./controllers/stats.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
 const createDebugMemberUpdatesMiddleware = require('./middleware/debug-member-updates.middleware');
@@ -16,6 +17,7 @@ const { createAdsStatisticsMonitor } = require('./services/ads-statistics-monito
 const { createMemberNotifier } = require('./services/member-notification.service');
 const { createDailySummaryStore } = require('./storage/daily-summary.store');
 const { createDailySummaryMonitor } = require('./services/daily-summary-monitor.service');
+const { createStatsReporter } = require('./services/stats-report.service');
 
 function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
   memberStore = createMemberStore(),
@@ -79,6 +81,13 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCampaignLinkController(bot, { channelId, logger });
+  registerStatsController(bot, {
+    logger,
+    getStats: channelStatisticsReader && createStatsReporter({
+      channelId, reader: { fetch: options => channelStatisticsReader.fetchPosts(options) },
+      summaryStore: dailySummaryStore, memberStore, beforeReport: orderedUpdates.drain,
+    }),
+  });
   registerMessageController(bot);
 
   bot.catch((error) => {
