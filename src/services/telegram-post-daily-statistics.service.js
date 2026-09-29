@@ -27,15 +27,14 @@ function parseGraph(graph) {
   return { times, series, step };
 }
 
-function countPeriod(graph, names, start, end, postedAt, total, coverage = graph) {
+function countPeriod(graph, names, start, end, postedAt, total) {
   if (postedAt >= end) return 0;
   if (!graph) return null;
-  const series = names ? graph.series.filter(column => names.includes(column.name)) : graph.series;
+  const series = graph.series.filter(column => names.includes(column.name));
   if (!series.length || !graph.times.length) return total === 0 ? 0 : null;
-  const first = coverage?.times[0] ?? graph.times[0];
+  const first = graph.times[0];
   // A truncated graph must not turn missing history into zero activity.
-  const coverageStep = coverage?.step || graph.step;
-  if (first > start && Math.floor(postedAt / coverageStep) * coverageStep < first) return null;
+  if (first > start && Math.floor(postedAt / graph.step) * graph.step < first) return null;
   let totalForPeriod = 0;
   for (let index = 0; index < graph.times.length; index++) {
     const time = graph.times[index];
@@ -48,9 +47,8 @@ function countPeriod(graph, names, start, end, postedAt, total, coverage = graph
   return totalForPeriod;
 }
 
-function dailyPostCounters(post, viewsGraph, reactionsGraph, { periodStart, periodEnd }) {
+function dailyPostCounters(post, viewsGraph, { periodStart, periodEnd }) {
   const views = parseGraph(viewsGraph);
-  const reactions = parseGraph(reactionsGraph);
   const start = Date.parse(periodStart);
   const end = Date.parse(periodEnd);
   const postedAt = Date.parse(post.postedAt);
@@ -60,7 +58,6 @@ function dailyPostCounters(post, viewsGraph, reactionsGraph, { periodStart, peri
   function counters(from, to) {
     return {
       views: countPeriod(views, ['Views'], from, to, postedAt, post.views),
-      reactions: countPeriod(reactions, null, from, to, postedAt, post.reactions, views),
       forwards: countPeriod(views, ['Shares'], from, to, postedAt, post.forwards),
     };
   }
@@ -85,10 +82,12 @@ async function fetchDailyPostStatistics(client, inputChannel, options, statsDc) 
   for (const post of history.posts) {
     const stats = await client.invoke(new Api.stats.GetMessageStats({ channel: inputChannel, msgId: post.messageId }), statsDc);
     const views = await readGraph(stats.viewsGraph);
-    const reactions = await readGraph(stats.reactionsByEmotionGraph);
-    const { current, previous } = dailyPostCounters(post, views, reactions, options);
-    posts.push({ ...post, ...current });
-    previousPosts.push({ messageId: post.messageId, ...previous });
+    const { current, previous } = dailyPostCounters(post, views, options);
+    // The emotion graph is not the complete message reaction counter. Keep the
+    // actual current count separate from historical counters until snapshots
+    // at the requested day boundaries are available.
+    posts.push({ ...post, ...current, reactions: null, currentReactions: post.reactions });
+    previousPosts.push({ messageId: post.messageId, ...previous, reactions: null });
   }
   return { channelId, fetchedAt: new Date().toISOString(), posts, previousPosts };
 }

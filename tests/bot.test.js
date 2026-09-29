@@ -223,7 +223,8 @@ test('the assembled bot reads post counters through the shared reader and sends 
       reads++;
       assert.ok(Date.parse(periodEnd) <= Date.now());
       return { channelId, fetchedAt: new Date().toISOString(), posts: [{
-        messageId: 42, postedAt: '2025-01-01T00:00:00.000Z', preview: '<Test>', views: 10, reactions: 2, forwards: 1,
+        messageId: 42, postedAt: '2025-01-01T00:00:00.000Z', preview: '<Test>', views: 10,
+        reactions: null, currentReactions: 19, forwards: 1,
       }] };
     }, close: async () => { closed++; } },
     logger: { log() {}, error: (...args) => errors.push(args) },
@@ -239,6 +240,7 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.equal(sent[0][0], config.ownerId);
   assert.match(sent[0][1], /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
   assert.match(sent[0][1], /Пользователей добавилось на канал: <b>3<\/b>/);
+  assert.match(sent[0][1], /Количество реакций: <b>19<\/b> \(сейчас; нет данных за сутки\)/);
   assert.match(sent[0][1], /<b>Пост:<\/b> &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
   assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
   assert.deepEqual(errors, []);

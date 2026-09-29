@@ -66,14 +66,16 @@ function formatDailySummary({ date, membership, posts, periodStart, channelId, p
   const lines = [`<b>📈 Статистика за ${escapeHtml(displayDate)}</b>`, '',
     `Пользователей добавилось на канал: <b>${membership.joined}</b>`,
     `Пользователей отписалось: <b>${membership.left}</b>`, '',
-    '<b>Информация по трем последним постам</b>'];
+    '<b>Информация по пяти последним постам</b>'];
   for (const post of posts) {
     const previous = previousPosts.find(entry => entry.messageId === post.messageId);
     const isNew = Date.parse(post.postedAt) >= Date.parse(periodStart);
     const link = `https://t.me/c/${-Number(channelId) - 1000000000000}/${post.messageId}`;
     lines.push('', `<b>Пост:</b> ${escapeHtml(post.preview || 'Пост без текста')} ${link}`,
       `Количество просмотров: ${formatCounter(post.views, previous?.views, isNew)}`,
-      `Количество реакций: ${formatCounter(post.reactions, previous?.reactions, isNew)}`,
+      `Количество реакций: ${post.reactionPeriod === 'current' && post.reactions != null
+        ? `<b>${post.reactions}</b> (сейчас; нет данных за сутки)`
+        : formatCounter(post.reactions, previous?.reactions, isNew)}`,
       `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew)}`);
   }
   if (!posts.length) lines.push('', 'На канале пока нет постов.');

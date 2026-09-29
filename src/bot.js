@@ -18,6 +18,7 @@ const { createMemberNotifier } = require('./services/member-notification.service
 const { createDailySummaryStore } = require('./storage/daily-summary.store');
 const { createDailySummaryMonitor } = require('./services/daily-summary-monitor.service');
 const { createStatsReporter } = require('./services/stats-report.service');
+const { createReactionStatistics } = require('./services/reaction-statistics.service');
 
 function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
   memberStore = createMemberStore(),
@@ -44,6 +45,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     });
   }
   if (statisticsConfig) {
+    bot.reactionStatistics = createReactionStatistics({ reader: channelStatisticsReader, summaryStore: dailySummaryStore, logger });
     bot.sourceStatistics = createSourceStatisticsMonitor({
       reader: channelStatisticsReader,
       statisticsStore, memberStore, logger,
@@ -56,6 +58,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     bot.dailySummary = createDailySummaryMonitor({
       reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
       summaryStore: dailySummaryStore, memberStore, logger,
+      reactionStatistics: bot.reactionStatistics,
       beforeReport: orderedUpdates.drain,
       sendMessage: text => bot.telegram.sendMessage(ownerId, text, {
         parse_mode: 'HTML', link_preview_options: { is_disabled: true },
@@ -86,6 +89,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     getStats: channelStatisticsReader && createStatsReporter({
       channelId, reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
       summaryStore: dailySummaryStore, memberStore, beforeReport: orderedUpdates.drain,
+      reactionStatistics: bot.reactionStatistics,
     }),
   });
   registerMessageController(bot);

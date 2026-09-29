@@ -1,5 +1,7 @@
 const { Api } = require('teleproto');
 
+const POST_LIMIT = 5;
+
 function counter(value) {
   if (value == null) return null;
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('POST_STATISTICS_INVALID_COUNTER');
@@ -30,8 +32,8 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(message);
     }
-    // A fourth group means the three newest groups, including the last album, are complete.
-    if (groups.size > 3 || result.messages.length < 100) break;
+    // One extra group means all requested posts, including the last album, are complete.
+    if (groups.size > POST_LIMIT || result.messages.length < 100) break;
     const nextOffset = Math.min(...result.messages.map(message => message.id));
     if (!Number.isSafeInteger(nextOffset) || nextOffset <= 0 || (offsetId && nextOffset >= offsetId)) {
       throw new Error('POST_STATISTICS_INVALID_PAGINATION');
@@ -40,7 +42,7 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
   }
   const posts = [...groups.values()]
     .sort((a, b) => Math.max(...b.map(m => m.id)) - Math.max(...a.map(m => m.id)))
-    .slice(0, 3).map(group => {
+    .slice(0, POST_LIMIT).map(group => {
       group.sort((a, b) => a.id - b.id);
       const first = group[0];
       const reactions = first.reactions?.results || [];

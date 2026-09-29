@@ -16,12 +16,12 @@ function reader(pages, requests = []) {
   } };
 }
 
-test('reads the latest three channel posts, counts all reactions, preserves media and truncates Unicode previews', async () => {
+test('reads the latest five channel posts, counts all reactions, preserves media and truncates Unicode previews', async () => {
   const service = new Api.MessageService({ id: 40, date: 1790668800 });
   const posts = [service, message(30, { message: '😀'.repeat(101), reactions: { results: [{ count: 3 }, { count: 4 }] } }),
-    message(20, { message: '' }), message(10), message(5)];
+    message(20, { message: '' }), message(10), message(5), message(4), message(3)];
   const result = await fetchLatestPostStatistics(reader([posts]), input, options);
-  assert.deepEqual(result.posts.map(post => post.messageId), [30, 20, 10]);
+  assert.deepEqual(result.posts.map(post => post.messageId), [30, 20, 10, 5, 4]);
   assert.equal(Array.from(result.posts[0].preview).length, 100);
   assert.equal(result.posts[0].reactions, 7);
   assert.equal(result.posts[0].views, 300);
@@ -39,13 +39,14 @@ test('an album is one post using its first message counters and caption, without
   assert.equal(result.posts[0].views, 300);
 });
 
-test('paginates beyond service events and finishes an album crossing a page boundary', async () => {
-  const first = Array.from({ length: 99 }, (_, index) => new Api.MessageService({ id: 200 - index, date: 1790668800 }));
+test('paginates beyond service events and finishes the fifth post album across a page boundary', async () => {
+  const first = [message(205), message(204), message(203), message(202),
+    ...Array.from({ length: 95 }, (_, index) => new Api.MessageService({ id: 201 - index, date: 1790668800 }))];
   first.push(message(100, { groupedId: 44, message: '' }));
   const requests = [];
   const result = await fetchLatestPostStatistics(reader([first, [message(99, { groupedId: 44 }), message(90), message(80)]], requests), input, options);
   assert.equal(requests[1].offsetId, 100);
-  assert.deepEqual(result.posts.map(post => post.messageId), [99, 90, 80]);
+  assert.deepEqual(result.posts.map(post => post.messageId), [205, 204, 203, 202, 99]);
 });
 
 test('does not include posts published at or after the report boundary', async () => {

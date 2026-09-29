@@ -7,6 +7,7 @@ const { createStatsReporter } = require('../src/services/stats-report.service');
 const { createDailySummaryStore } = require('../src/storage/daily-summary.store');
 const { createMemberStore } = require('../src/storage/member.store');
 const { reportWindow, formatDailySummary } = require('../src/services/daily-summary.service');
+const { createReactionStatistics } = require('../src/services/reaction-statistics.service');
 
 const channelId = '-1001234567890';
 const posts = [{ messageId: 30, preview: '<Пост>', postedAt: '2026-09-27T08:00:00.000Z',
@@ -50,9 +51,9 @@ test('stats queries historical cumulative counts even before the first report wi
 test('stats reuses an existing pending or sent report and its original daily deltas without changing delivery state', async t => {
   const h = await setup(t);
   await h.summaryStore.initialize('2026-09-27T12:00:00.000Z');
-  const yesterday = { ...reportWindow(new Date('2026-09-28T12:00:00.000Z')), channelId, kind: 'calendar_totals',
+  const yesterday = { ...reportWindow(new Date('2026-09-28T12:00:00.000Z')), channelId, kind: 'calendar_totals_reactions',
     membership: { joined: 0, left: 0 }, posts: [{ ...posts[0], views: 9999, reactions: 999, forwards: 99 }] };
-  const today = { ...reportWindow(h.options.now()), channelId, kind: 'calendar_totals', membership: { joined: 7, left: 2 }, posts, previousPosts };
+  const today = { ...reportWindow(h.options.now()), channelId, kind: 'calendar_totals_reactions', membership: { joined: 7, left: 2 }, posts, previousPosts };
   for (const report of [yesterday, today]) {
     await h.summaryStore.prepare({ ...report, text: formatDailySummary(report) });
   }
@@ -73,11 +74,11 @@ test('stats reuses an existing pending or sent report and its original daily del
   assert.deepEqual(h.requests, []);
 });
 
-test('stats rebuilds a legacy daily-activity report without changing its delivery history', async t => {
+for (const version of [2, 3]) test(`stats rebuilds a version ${version} report without changing its delivery history`, async t => {
   const h = await setup(t);
-  const report = { ...reportWindow(h.options.now()), kind: 'calendar_day', channelId, posts,
+  const report = { ...reportWindow(h.options.now()), kind: version === 2 ? 'calendar_day' : 'calendar_totals', channelId, posts,
     status: 'sent', text: 'Old daily activity comparison' };
-  const raw = JSON.stringify({ version: 2, channelId, initializedAt: '2026-09-27T12:00:00.000Z',
+  const raw = JSON.stringify({ version, channelId, initializedAt: '2026-09-27T12:00:00.000Z',
     reports: { [report.date]: report } });
   await writeFile(h.filePath, raw);
   const text = await createStatsReporter(h.options)();
@@ -85,6 +86,35 @@ test('stats rebuilds a legacy daily-activity report without changing its deliver
   assert.doesNotMatch(text, /Old daily activity/);
   assert.equal(h.requests.length, 1);
   assert.equal(await readFile(h.filePath, 'utf8'), raw);
+});
+
+test('stats refreshes a fallback current reaction count without using a saved graph baseline or changing the outbox', async t => {
+  const h = await setup(t);
+  const window = reportWindow(h.options.now());
+  await h.summaryStore.initialize('2026-09-27T12:00:00.000Z');
+  await h.summaryStore.prepare({ ...window, channelId, kind: 'calendar_totals_reactions', membership: { joined: 0, left: 0 },
+    posts: [{ ...posts[0], reactions: 15, reactionPeriod: 'current' }], previousPosts, text: 'Previously sent fallback' });
+  await h.summaryStore.markSent(window.date, h.options.now().toISOString());
+  const raw = await readFile(h.filePath, 'utf8');
+  const reactionStatistics = createReactionStatistics({ summaryStore: h.summaryStore });
+  const getStats = createStatsReporter({ ...h.options, reactionStatistics,
+    reader: { fetch: async () => ({ channelId, posts: [{ ...posts[0], reactions: null, currentReactions: 19 }], previousPosts }) },
+  });
+  assert.match(await getStats(), /Количество реакций: <b>19<\/b> \(сейчас; нет данных за сутки\)/);
+  assert.equal(await readFile(h.filePath, 'utf8'), raw);
+});
+
+test('stats uses stored midnight counts instead of the newer current count', async t => {
+  const h = await setup(t);
+  const window = reportWindow(h.options.now());
+  for (const [boundaryAt, reactions] of [[window.periodStart, 15], [window.periodEnd, 17]]) {
+    await h.summaryStore.saveReactionSnapshot({ boundaryAt, capturedAt: boundaryAt, posts: [{ ...posts[0], reactions }] });
+  }
+  const getStats = createStatsReporter({ ...h.options,
+    reactionStatistics: createReactionStatistics({ summaryStore: h.summaryStore }),
+    reader: { fetch: async () => ({ channelId, posts: [{ ...posts[0], reactions: null, currentReactions: 19 }], previousPosts }) },
+  });
+  assert.match(await getStats(), /Количество реакций: <b>17 \(\+2\)<\/b>/);
 });
 
 test('stats before 11:00 already selects yesterday, including a daylight-saving transition', async t => {

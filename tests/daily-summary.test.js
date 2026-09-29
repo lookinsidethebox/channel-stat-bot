@@ -38,7 +38,7 @@ test('the summary uses bold headings, escaped previews and honest positive, nega
   const text = formatDailySummary({ ...summary, previousPosts: [{ messageId: 20, views: 300, reactions: 11, forwards: 5 }] });
   assert.equal(text, [
     '<b>📈 Статистика за 28.09.2026</b>', '', 'Пользователей добавилось на канал: <b>7</b>', 'Пользователей отписалось: <b>2</b>', '',
-    '<b>Информация по трем последним постам</b>', '',
+    '<b>Информация по пяти последним постам</b>', '',
     '<b>Пост:</b> Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
     'Количество просмотров: <b>100 (+100)</b>', 'Количество реакций: <b>5 (+5)</b>', 'Количество репостов: <b>2 (+2)</b>', '',
     '<b>Пост:</b> Вчерашний пост https://t.me/c/1234567890/20',
@@ -233,7 +233,7 @@ test('legacy 11:00 reports are preserved separately and never replayed or reused
     reports: { '2026-09-28': legacy } }));
   const raw = await readFile(h.filePath, 'utf8');
   const migrated = await h.store.getState();
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.deepEqual(migrated.reports, {});
   assert.equal(await readFile(h.filePath, 'utf8'), raw);
   h.setTime('2026-09-29T09:00:00.000Z');
@@ -242,17 +242,17 @@ test('legacy 11:00 reports are preserved separately and never replayed or reused
   assert.match(h.messages[0], /Статистика за 28\.09\.2026/);
   const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
   assert.deepEqual(saved.legacyReports['2026-09-28'], legacy);
-  assert.equal(saved.reports['2026-09-28'].kind, 'calendar_totals');
+  assert.equal(saved.reports['2026-09-28'].kind, 'calendar_totals_reactions');
   assert.equal(saved.reports['2026-09-28'].periodEnd, '2026-09-29T00:00:00.000Z');
 });
 
-for (const status of ['pending', 'sent']) {
-  test(`legacy daily-activity reports are archived; ${status === 'sent' ? 'sent reports are not delivered twice' : 'pending reports are rebuilt'}`, async t => {
+for (const version of [2, 3]) for (const status of ['pending', 'sent']) {
+  test(`version ${version} reports are archived; ${status === 'sent' ? 'sent reports are not delivered twice' : 'pending reports are rebuilt'}`, async t => {
     const h = await harness(t);
-    const legacy = { ...calendarWindow('2026-09-28'), kind: 'calendar_day',
+    const legacy = { ...calendarWindow('2026-09-28'), kind: version === 2 ? 'calendar_day' : 'calendar_totals',
       posts: summary.posts, text: 'Old daily activity comparison', status };
     const legacyReports = { '2026-09-27': { text: 'Older 11:00 report' } };
-    await writeFile(h.filePath, JSON.stringify({ version: 2, channelId, initializedAt: '2026-09-28T10:00:00.000Z',
+    await writeFile(h.filePath, JSON.stringify({ version, channelId, initializedAt: '2026-09-28T10:00:00.000Z',
       legacyReports, reports: { [legacy.date]: legacy } }));
     h.setTime('2026-09-29T09:00:00.000Z');
     await h.monitor().checkPending();
@@ -261,15 +261,15 @@ for (const status of ['pending', 'sent']) {
     assert.ok(h.messages.every(text => !text.includes('Old daily activity')));
     if (status === 'pending') {
       assert.match(h.messages[0], /Количество просмотров: <b>100 \(\+100\)<\/b>/);
-      assert.equal((await h.store.getState()).reports[legacy.date].kind, 'calendar_totals');
+      assert.equal((await h.store.getState()).reports[legacy.date].kind, 'calendar_totals_reactions');
     }
     h.setTime('2026-09-30T09:00:00.000Z');
     await h.monitor().checkPending();
     const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
-    assert.equal(saved.version, 3);
+    assert.equal(saved.version, 4);
     assert.deepEqual(saved.legacyReports, legacyReports);
-    assert.deepEqual(saved.legacyActivityReports[legacy.date], legacy);
-    assert.equal(saved.reports['2026-09-29'].kind, 'calendar_totals');
+    assert.deepEqual(saved[version === 2 ? 'legacyActivityReports' : 'legacyReactionReports'][legacy.date], legacy);
+    assert.equal(saved.reports['2026-09-29'].kind, 'calendar_totals_reactions');
     assert.equal(saved.reports['2026-09-29'].status, 'sent');
     assert.equal(h.messages.length, status === 'sent' ? 1 : 2);
   });
