@@ -219,9 +219,9 @@ test('the assembled bot reads post counters through the shared reader and sends 
   const bot = createBot({ ...config, channelId, sourceStatistics: {}, dailySummary: true }, {
     dailySummaryStore: summaryStore,
     memberStore: { countEvents: async () => ({ joined: 3, left: 1 }) },
-    statisticsReader: { fetchPosts: async ({ before }) => {
+    statisticsReader: { fetchDailyPosts: async ({ periodEnd }) => {
       reads++;
-      assert.ok(Date.parse(before) <= Date.now());
+      assert.ok(Date.parse(periodEnd) <= Date.now());
       return { channelId, fetchedAt: new Date().toISOString(), posts: [{
         messageId: 42, postedAt: '2025-01-01T00:00:00.000Z', preview: '<Test>', views: 10, reactions: 2, forwards: 1,
       }] };
@@ -237,9 +237,9 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.equal(closed, 1);
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], config.ownerId);
-  assert.match(sent[0][1], /<b>📈 Статистика за сутки<\/b>/);
-  assert.match(sent[0][1], /Пользователей добавилось на канал: 3/);
-  assert.match(sent[0][1], /Пост: &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
+  assert.match(sent[0][1], /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
+  assert.match(sent[0][1], /<b>Пользователей добавилось на канал:<\/b> 3/);
+  assert.match(sent[0][1], /<b>Пост:<\/b> &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
   assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
   assert.deepEqual(errors, []);
 });
@@ -255,7 +255,7 @@ test('stats is owner-only, accepts an addressed command and works with scheduled
   const bot = createBot({ ...config, channelId, sourceStatistics: {}, dailySummary: false }, {
     dailySummaryStore: createDailySummaryStore(channelId, filePath),
     memberStore: { countEvents: async () => ({ joined: 3, left: 1 }) },
-    statisticsReader: { fetchPosts: async () => {
+    statisticsReader: { fetchDailyPosts: async () => {
       reads++;
       return { channelId, fetchedAt: new Date().toISOString(), posts: [] };
     } },
@@ -273,8 +273,8 @@ test('stats is owner-only, accepts an addressed command and works with scheduled
   assert.equal(replies.length, 2);
   for (const [recipient, text, extra] of replies) {
     assert.equal(String(recipient), config.ownerId);
-    assert.match(text, /<b>📈 Статистика за сутки<\/b>/);
-    assert.match(text, /Пользователей добавилось на канал: 3/);
+    assert.match(text, /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
+    assert.match(text, /<b>Пользователей добавилось на канал:<\/b> 3/);
     assert.equal(extra.parse_mode, 'HTML');
     assert.deepEqual(extra.link_preview_options, { is_disabled: true });
   }

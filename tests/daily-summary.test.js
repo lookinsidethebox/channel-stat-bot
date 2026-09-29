@@ -3,42 +3,48 @@ const test = require('node:test');
 const { mkdtemp, rm, writeFile, readFile } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { reportWindow, scheduledAt, formatDailySummary } = require('../src/services/daily-summary.service');
+const { reportWindow, dueReportWindow, calendarWindow, scheduledAt, formatDailySummary } = require('../src/services/daily-summary.service');
 const { createDailySummaryMonitor } = require('../src/services/daily-summary-monitor.service');
 const { createDailySummaryStore } = require('../src/storage/daily-summary.store');
 const { createMemberStore } = require('../src/storage/member.store');
 
 const channelId = '-1001234567890';
-const summary = { channelId, periodStart: '2026-09-28T09:00:00.000Z',
+const summary = { channelId, ...calendarWindow('2026-09-28'),
   membership: { joined: 7, left: 2 }, posts: [
-    { messageId: 30, preview: 'Текст <поста> & ссылка', postedAt: '2026-09-29T08:00:00Z', views: 100, reactions: 5, forwards: 2 },
+    { messageId: 30, preview: 'Текст <поста> & ссылка', postedAt: '2026-09-28T08:00:00Z', views: 100, reactions: 5, forwards: 2 },
     { messageId: 20, preview: 'Вчерашний пост', postedAt: '2026-09-27T08:00:00Z', views: 350, reactions: 9, forwards: 5 },
     { messageId: 10, preview: null, postedAt: '2026-09-26T08:00:00Z', views: null, reactions: 0, forwards: 0 },
   ] };
 
-test('daily boundaries stay at 11:00 in Podgorica across both daylight-saving transitions', () => {
+test('statistics days stay in UTC while delivery stays at 11:00 Podgorica across daylight-saving transitions', () => {
   assert.equal(scheduledAt('2026-09-29'), '2026-09-29T09:00:00.000Z');
   assert.equal(scheduledAt('2026-12-29'), '2026-12-29T10:00:00.000Z');
-  for (const [date, hours, utcHour] of [['2026-03-29', 23, '09'], ['2026-10-25', 25, '10']]) {
-    const window = reportWindow(new Date(`${date}T${utcHour}:00:00.000Z`));
+  for (const date of ['2026-03-29', '2026-10-25']) {
+    const window = calendarWindow(date);
     assert.equal(window.date, date);
-    assert.equal((Date.parse(window.periodEnd) - Date.parse(window.periodStart)) / 3600000, hours);
+    assert.equal((Date.parse(window.periodEnd) - Date.parse(window.periodStart)) / 3600000, 24);
+    assert.equal(window.periodStart, `${date}T00:00:00.000Z`);
   }
   assert.equal(reportWindow(new Date('2026-09-29T08:59:59Z')).date, '2026-09-28');
-  assert.equal(reportWindow(new Date('2026-09-29T09:00:00Z')).date, '2026-09-29');
+  assert.equal(reportWindow(new Date('2026-09-29T09:00:00Z')).date, '2026-09-28');
+  assert.equal(reportWindow(new Date('2026-09-28T22:00:00Z')).date, '2026-09-27');
+  assert.equal(reportWindow(new Date('2026-09-29T00:00:00Z')).date, '2026-09-28');
+  assert.equal(reportWindow(new Date('2026-09-28T22:00:00Z')).nextAt, '2026-09-29T09:00:00.000Z');
+  assert.equal(dueReportWindow(new Date('2026-09-29T08:59:59Z')).date, '2026-09-27');
+  assert.equal(dueReportWindow(new Date('2026-09-29T09:00:00Z')).date, '2026-09-28');
 });
 
 test('the summary uses bold headings, escaped previews and honest positive, negative and missing deltas', () => {
-  const text = formatDailySummary(summary, [{ messageId: 20, views: 300, reactions: 11, forwards: 5 }]);
+  const text = formatDailySummary({ ...summary, previousPosts: [{ messageId: 20, views: 300, reactions: 11, forwards: 5 }] });
   assert.equal(text, [
-    '<b>📈 Статистика за сутки</b>', '', 'Пользователей добавилось на канал: 7', 'Пользователей отписалось: 2', '',
+    '<b>📈 Статистика за 28.09.2026</b>', '', '<b>Пользователей добавилось на канал:</b> 7', '<b>Пользователей отписалось:</b> 2', '',
     '<b>Информация по трем последним постам</b>', '',
-    'Пост: Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
-    'Количество просмотров: 100 (+100)', 'Количество реакций: 5 (+5)', 'Количество репостов: 2 (+2)', '',
-    'Пост: Вчерашний пост https://t.me/c/1234567890/20',
-    'Количество просмотров: 350 (+50)', 'Количество реакций: 9 (-2)', 'Количество репостов: 5 (0)', '',
-    'Пост: Пост без текста https://t.me/c/1234567890/10',
-    'Количество просмотров: нет данных', 'Количество реакций: 0 (нет данных за вчера)', 'Количество репостов: 0 (нет данных за вчера)',
+    '<b>Пост:</b> Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
+    '<b>Количество просмотров:</b> 100 (+100)', '<b>Количество реакций:</b> 5 (+5)', '<b>Количество репостов:</b> 2 (+2)', '',
+    '<b>Пост:</b> Вчерашний пост https://t.me/c/1234567890/20',
+    '<b>Количество просмотров:</b> 350 (+50)', '<b>Количество реакций:</b> 9 (-2)', '<b>Количество репостов:</b> 5 (0)', '',
+    '<b>Пост:</b> Пост без текста https://t.me/c/1234567890/10',
+    '<b>Количество просмотров:</b> нет данных', '<b>Количество реакций:</b> 0 (нет данных за вчера)', '<b>Количество репостов:</b> 0 (нет данных за вчера)',
   ].join('\n'));
   assert.ok(formatDailySummary({ ...summary, posts: [] }).endsWith('На канале пока нет постов.'));
 });
@@ -51,6 +57,7 @@ async function harness(t) {
   const members = createMemberStore(path.join(directory, 'members.json'));
   let instant = new Date('2026-09-28T10:00:00Z');
   let posts = summary.posts;
+  let previousPosts = [];
   let readFailure;
   let sendFailure = false;
   let requests = 0;
@@ -59,11 +66,12 @@ async function harness(t) {
   let beforeReport = async () => {};
   function monitor(summaryStore = store) {
     return createDailySummaryMonitor({ summaryStore, memberStore: members, now: () => instant,
-      reader: { fetch: async ({ before }) => {
+      reader: { fetch: async ({ periodStart, periodEnd }) => {
         requests++;
-        assert.ok(Date.parse(before) <= instant.getTime());
+        assert.ok(Date.parse(periodEnd) <= instant.getTime());
+        assert.ok(Date.parse(periodStart) < Date.parse(periodEnd));
         if (readFailure) throw readFailure;
-        return { channelId, posts, fetchedAt: instant.toISOString() };
+        return { channelId, posts, previousPosts, fetchedAt: instant.toISOString() };
       } },
       beforeReport: () => beforeReport(),
       sendMessage: async text => { if (sendFailure) throw new Error('Network failure'); messages.push(text); },
@@ -72,7 +80,7 @@ async function harness(t) {
   }
   await store.initialize(instant.toISOString());
   return { filePath, store, members, monitor, messages, errors, requests: () => requests,
-    setTime: time => { instant = new Date(time); }, setPosts: value => { posts = value; },
+    setTime: time => { instant = new Date(time); }, setPosts: value => { previousPosts = posts; posts = value; },
     failRead: error => { readFailure = error; }, failSend: value => { sendFailure = value; },
     beforeReport: action => { beforeReport = action; },
   };
@@ -82,13 +90,13 @@ test('counts joins and leaves in the exact report window, including re-joins and
   const h = await harness(t);
   const user = { id: 1, name: 'Test', username: null };
   const record = (action, occurredAt, id = 1) => h.members.recordMemberEvent({ action, occurredAt, user: { ...user, id }, source: { type: 'url' } });
-  await record('joined', '2026-09-28T08:59:59.000Z');
-  await record('left', '2026-09-28T09:00:00.000Z');
+  await record('joined', '2026-09-27T23:59:59.000Z');
+  await record('left', '2026-09-28T00:00:00.000Z');
   await record('joined', '2026-09-28T10:00:00.000Z');
-  await record('left', '2026-09-29T08:59:59.000Z');
+  await record('left', '2026-09-28T23:59:59.000Z');
   await record('left', '2026-09-28T12:00:00.000Z', 2);
-  await record('joined', '2026-09-29T09:00:00.000Z');
-  assert.deepEqual(await h.members.countEvents(summary.periodStart, '2026-09-29T09:00:00.000Z'), { joined: 1, left: 3 });
+  await record('joined', '2026-09-29T00:00:00.000Z');
+  assert.deepEqual(await h.members.countEvents(summary.periodStart, summary.periodEnd), { joined: 1, left: 3 });
 });
 
 test('first activation does not send a stale report and each later day sends once despite concurrent checks and restarts', async t => {
@@ -108,16 +116,16 @@ test('first activation does not send a stale report and each later day sends onc
   h.setPosts(summary.posts.map(post => ({ ...post, views: 450, reactions: 10, forwards: 7 })));
   await monitor.checkPending();
   assert.equal(h.messages.length, 2);
-  assert.ok(h.messages[1].includes('Количество просмотров: 450 (+350)'));
+  assert.ok(h.messages[1].includes('<b>Количество просмотров:</b> 450 (+350)'));
 });
 
 test('waits for queued channel updates before counting membership events', async t => {
   const h = await harness(t);
-  h.beforeReport(() => h.members.recordMemberEvent({ action: 'joined', occurredAt: '2026-09-29T08:59:00.000Z',
+  h.beforeReport(() => h.members.recordMemberEvent({ action: 'joined', occurredAt: '2026-09-28T21:59:00.000Z',
     user: { id: 1, name: 'Test', username: null }, source: { type: 'url' } }));
   h.setTime('2026-09-29T09:00:00Z');
   await h.monitor().checkPending();
-  assert.ok(h.messages[0].includes('Пользователей добавилось на канал: 1'));
+  assert.ok(h.messages[0].includes('<b>Пользователей добавилось на канал:</b> 1'));
 });
 
 test('the running timer fires at 11:00, schedules the next check and stops without further sends', async t => {
@@ -152,7 +160,7 @@ test('a failed send replays the persisted report after restart without fetching 
   h.setTime('2026-09-29T09:00:00Z');
   h.failSend(true);
   await h.monitor().checkPending();
-  const pending = (await h.store.getState()).reports['2026-09-29'];
+  const pending = (await h.store.getState()).reports['2026-09-28'];
   assert.equal(pending.status, 'pending');
   assert.equal(h.messages.length, 0);
   h.failSend(false);
@@ -174,7 +182,7 @@ test('a failed acknowledgement retries saving without sending a duplicate in the
   h.setTime('2026-09-29T09:01:00Z');
   await monitor.checkPending();
   assert.equal(h.messages.length, 1);
-  assert.equal((await h.store.getState()).reports['2026-09-29'].status, 'sent');
+  assert.equal((await h.store.getState()).reports['2026-09-28'].status, 'sent');
 });
 
 test('request failures respect FLOOD_WAIT and do not persist fabricated zero counters', async t => {
@@ -194,16 +202,17 @@ test('request failures respect FLOOD_WAIT and do not persist fabricated zero cou
   assert.equal(h.messages.length, 1);
 });
 
-test('after several missed days only the latest report is prepared and older snapshots are not called yesterday', async t => {
+test('after missed deliveries the latest calendar day uses historical API counts for both comparison days', async t => {
   const h = await harness(t);
   const monitor = h.monitor();
   h.setTime('2026-09-29T09:00:00Z');
   await monitor.checkPending();
   h.setTime('2026-10-02T11:00:00Z');
+  h.setPosts(summary.posts.map(post => ({ ...post, views: 150 })));
   await monitor.checkPending();
   assert.equal(h.messages.length, 2);
-  assert.ok(h.messages[1].includes('100 (нет данных за вчера)'));
-  assert.deepEqual(Object.keys((await h.store.getState()).reports), ['2026-09-29', '2026-10-02']);
+  assert.ok(h.messages[1].includes('150 (+50)'));
+  assert.deepEqual(Object.keys((await h.store.getState()).reports), ['2026-09-28', '2026-10-01']);
 });
 
 test('a corrupt state file or another channel is preserved and cannot reset delivery history', async t => {
@@ -214,4 +223,25 @@ test('a corrupt state file or another channel is preserved and cannot reset deli
   await h.monitor().checkPending();
   assert.equal(await readFile(h.filePath, 'utf8'), '{broken');
   assert.equal(h.messages.length, 0);
+});
+
+test('legacy 11:00 reports are preserved separately and never replayed or reused as calendar-day statistics', async t => {
+  const h = await harness(t);
+  const legacy = { date: '2026-09-28', periodStart: '2026-09-27T09:00:00.000Z',
+    periodEnd: '2026-09-28T09:00:00.000Z', posts: summary.posts, text: 'Old 11:00 report', status: 'pending' };
+  await writeFile(h.filePath, JSON.stringify({ version: 1, channelId, initializedAt: '2026-09-28T10:00:00.000Z',
+    reports: { '2026-09-28': legacy } }));
+  const raw = await readFile(h.filePath, 'utf8');
+  const migrated = await h.store.getState();
+  assert.equal(migrated.version, 2);
+  assert.deepEqual(migrated.reports, {});
+  assert.equal(await readFile(h.filePath, 'utf8'), raw);
+  h.setTime('2026-09-29T09:00:00.000Z');
+  await h.monitor().checkPending();
+  assert.equal(h.messages.length, 1);
+  assert.match(h.messages[0], /Статистика за 28\.09\.2026/);
+  const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
+  assert.deepEqual(saved.legacyReports['2026-09-28'], legacy);
+  assert.equal(saved.reports['2026-09-28'].kind, 'calendar_day');
+  assert.equal(saved.reports['2026-09-28'].periodEnd, '2026-09-29T00:00:00.000Z');
 });

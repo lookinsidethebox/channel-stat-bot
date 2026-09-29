@@ -54,7 +54,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   if (dailySummary) {
     if (!channelStatisticsReader) throw new Error('DAILY_SUMMARY_REQUIRES_USER_SESSION');
     bot.dailySummary = createDailySummaryMonitor({
-      reader: { fetch: options => channelStatisticsReader.fetchPosts(options) },
+      reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
       summaryStore: dailySummaryStore, memberStore, logger,
       beforeReport: orderedUpdates.drain,
       sendMessage: text => bot.telegram.sendMessage(ownerId, text, {
@@ -84,7 +84,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   registerStatsController(bot, {
     logger,
     getStats: channelStatisticsReader && createStatsReporter({
-      channelId, reader: { fetch: options => channelStatisticsReader.fetchPosts(options) },
+      channelId, reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
       summaryStore: dailySummaryStore, memberStore, beforeReport: orderedUpdates.drain,
     }),
   });

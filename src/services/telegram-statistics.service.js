@@ -4,6 +4,7 @@ const { Logger, LogLevel } = require('teleproto/extensions/Logger');
 const { readSession, assertOwner } = require('./telegram-user-session');
 const { parseSourceGraph } = require('./source-statistics.service');
 const { fetchLatestPostStatistics } = require('./telegram-post-statistics.service');
+const { fetchDailyPostStatistics } = require('./telegram-post-daily-statistics.service');
 
 function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, sessionPath }) {
   let client;
@@ -74,6 +75,9 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
     },
     fetchPosts(options) {
       return request(activeClient => fetchLatestPostStatistics(activeClient, inputChannel, { ...options, channelId }));
+    },
+    fetchDailyPosts(options) {
+      return request(activeClient => fetchDailyPostStatistics(activeClient, inputChannel, { ...options, channelId }, statsDc));
     },
     close() {
       const operation = queue.then(disconnect);

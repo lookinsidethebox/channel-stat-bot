@@ -7,16 +7,18 @@ function createDailySummaryStore(channelId, filePath = path.join(__dirname, '../
   async function read() {
     try {
       const state = JSON.parse(await readFile(filePath, 'utf8'));
-      if (state.version !== 1 || state.channelId !== channelId || !Number.isFinite(Date.parse(state.initializedAt))
+      if (![1, 2].includes(state.version) || state.channelId !== channelId || !Number.isFinite(Date.parse(state.initializedAt))
         || !state.reports || typeof state.reports !== 'object' || Array.isArray(state.reports)
         || Object.entries(state.reports).some(([date, report]) => !report || report.date !== date
           || !['pending', 'sent'].includes(report.status) || typeof report.text !== 'string'
           || !Array.isArray(report.posts) || !Number.isFinite(Date.parse(report.periodEnd)))) {
         throw new Error('DAILY_SUMMARY_INVALID_STATE');
       }
+      // Old 11:00–11:00 reports are retained but never used as calendar days.
+      if (state.version === 1) return { ...state, version: 2, legacyReports: state.reports, reports: {} };
       return state;
     } catch (error) {
-      if (error.code === 'ENOENT') return { version: 1, channelId, initializedAt: null, reports: {} };
+      if (error.code === 'ENOENT') return { version: 2, channelId, initializedAt: null, reports: {}, legacyReports: {} };
       throw error;
     }
   }

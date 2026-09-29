@@ -1,4 +1,5 @@
-const { reportWindow, shiftDate, formatDailySummary } = require('./daily-summary.service');
+const { reportWindow, dueReportWindow, formatDailySummary } = require('./daily-summary.service');
+const { buildDailyReport } = require('./stats-report.service');
 
 function createDailySummaryMonitor({ reader, summaryStore, memberStore, sendMessage, beforeReport = async () => {},
   logger = console, now = () => new Date(), retryMs = 60000 }) {
@@ -28,15 +29,10 @@ function createDailySummaryMonitor({ reader, summaryStore, memberStore, sendMess
       await summaryStore.initialize(now().toISOString());
       await sendPending();
       const state = await summaryStore.getState();
-      const window = reportWindow(now());
-      if (window.periodEnd < state.initializedAt || state.reports[window.date]) return;
-      const snapshot = await reader.fetch({ before: window.periodEnd });
-      if (snapshot.channelId !== state.channelId) throw new Error('DAILY_SUMMARY_CHANNEL_MISMATCH');
-      await beforeReport();
-      const membership = await memberStore.countEvents(window.periodStart, window.periodEnd);
-      const report = { ...window, channelId: state.channelId, fetchedAt: snapshot.fetchedAt, membership, posts: snapshot.posts };
-      const previous = state.reports[shiftDate(window.date, -1)];
-      report.text = formatDailySummary(report, previous?.posts || []);
+      const window = dueReportWindow(now());
+      if (window.sendAt < state.initializedAt || state.reports[window.date]) return;
+      const report = await buildDailyReport({ window, channelId: state.channelId, reader, memberStore, beforeReport });
+      report.text = formatDailySummary(report);
       await summaryStore.prepare(report);
       await sendPending();
     } catch (error) {
