@@ -227,7 +227,7 @@ test('checks both the source and campaign before attempting the final notificati
   const { handler } = registerHandler({
     recordMemberEvent: async event => {
       calls.push('save');
-      assert.equal(event.campaignLookup.status, 'pending');
+      assert.equal(event.adsCampaign.status, 'pending');
       return true;
     },
     sourceStatistics: { checkJoin: async () => {
@@ -236,7 +236,7 @@ test('checks both the source and campaign before attempting the final notificati
     } },
     adsStatistics: { checkJoin: async () => {
       calls.push('ads');
-      return { campaign: { adId: 46, title: 'Любовные романы' } };
+      return { adsCampaign: { adId: 46, title: 'Любовные романы' } };
     } },
     notifyJoins: async () => { calls.push('notify'); },
   });

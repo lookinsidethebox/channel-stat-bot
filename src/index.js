@@ -25,6 +25,7 @@ async function main() {
   process.once('SIGTERM', onTerminate);
 
   try {
+    await bot.migrateCampaignFields();
     await bot.adsStatistics?.start();
     await bot.sourceStatistics?.start();
     await bot.urlPromos.sync();

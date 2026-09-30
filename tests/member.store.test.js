@@ -12,6 +12,33 @@ async function createTestStore(context) {
   return { ...createMemberStore(filePath), filePath, directory };
 }
 
+test('migrates legacy Ads and URL fields without losing campaign details', async context => {
+  const store = await createTestStore(context);
+  const at = '2026-09-29T12:00:00.000Z';
+  const old = { latestPost: null, members: [
+    { userId: 1, addedAt: at, removedAt: null, source: { type: 'ads' },
+      campaignLookup: { status: 'matched', checkedAt: at },
+      campaign: { accountId: 'account', adId: 42, title: 'Реклама', attribution: 'statistics_delta' } },
+    { userId: 2, addedAt: at, removedAt: null, source: { type: 'url' },
+      campaignLookup: { status: 'not_applicable', reason: 'source_is_not_ads' },
+      campaign: { id: 'promo', title: 'Фикбук', attribution: 'scheduled_url_promo' } },
+    { userId: 3, addedAt: at, removedAt: null, source: { type: 'ads' },
+      campaignLookup: { status: 'pending' } },
+  ] };
+  await writeFile(store.filePath, `${JSON.stringify(old)}\n`);
+  assert.equal((await store.getMember(1, at)).adsCampaign.adId, 42);
+  assert.equal((await store.getMember(2, at)).urlCampaign.title, 'Фикбук');
+  assert.equal(await store.migrateCampaignFields(), true);
+  const saved = JSON.parse(await readFile(store.filePath, 'utf8')).members;
+  assert.deepEqual(saved[0].adsCampaign, { status: 'matched', checkedAt: at,
+    accountId: 'account', adId: 42, title: 'Реклама', attribution: 'statistics_delta' });
+  assert.deepEqual(saved[1].urlCampaign, old.members[1].campaign);
+  assert.equal(saved[1].adsCampaign, undefined);
+  assert.deepEqual(saved[2].adsCampaign, { status: 'pending' });
+  assert.ok(saved.every(member => !Object.hasOwn(member, 'campaign') && !Object.hasOwn(member, 'campaignLookup')));
+  assert.equal(await store.migrateCampaignFields(), false);
+});
+
 test('stores post snapshots, untracked departures, and returns', async (context) => {
   const { recordMemberEvent, filePath } = await createTestStore(context);
 

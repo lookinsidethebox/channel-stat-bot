@@ -34,10 +34,10 @@ test('backfills URL joins in local calendar days, preserves Ads and survives res
   const result = await h.service.add({ title: 'Фикбук: диалоги', startDate: '2026-09-30', days: 2 });
   assert.equal(result.assigned, 2);
   const data = JSON.parse(await readFile(path.join(path.dirname(h.file), 'members.json'), 'utf8'));
-  assert.equal(data.members[0].campaign.title, 'Фикбук: диалоги');
-  assert.equal(data.members[1].campaign.attribution, 'scheduled_url_promo');
-  assert.equal(data.members[2].campaign, undefined);
-  assert.equal(data.members[3].campaign, undefined);
+  assert.equal(data.members[0].urlCampaign.title, 'Фикбук: диалоги');
+  assert.equal(data.members[1].urlCampaign.attribution, 'scheduled_url_promo');
+  assert.equal(data.members[2].urlCampaign, undefined);
+  assert.equal(data.members[3].urlCampaign, undefined);
   assert.match(formatJoinNotification(data.members[0]), /Источник: URL \(Фикбук: диалоги\)$/);
   assert.equal((await createUrlPromosStore(h.file).read()).campaigns[0].title, 'Фикбук: диалоги');
   assert.equal(await h.service.sync(), 0);
@@ -52,8 +52,8 @@ test('late URL source resolution assigns the campaign; Ads stays untouched', asy
     status: 'matched', source: { type: 'url' } });
   await h.join(3, '2026-09-30T14:00:00.000Z', 'ads');
   assert.equal(await h.service.sync(), 1);
-  assert.equal((await h.memberStore.getMember(2, '2026-09-30T13:00:00.000Z')).campaign.title, 'Статья');
-  assert.equal((await h.memberStore.getMember(3, '2026-09-30T14:00:00.000Z')).campaign, undefined);
+  assert.equal((await h.memberStore.getMember(2, '2026-09-30T13:00:00.000Z')).urlCampaign.title, 'Статья');
+  assert.equal((await h.memberStore.getMember(3, '2026-09-30T14:00:00.000Z')).urlCampaign, undefined);
 });
 
 test('rejects overlapping periods and invalid dates without changing saved campaigns', async t => {

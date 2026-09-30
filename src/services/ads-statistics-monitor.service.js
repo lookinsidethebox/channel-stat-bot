@@ -21,7 +21,7 @@ function createAdsStatisticsMonitor({ reader, statisticsStore, memberStore, onRe
       const decision = state.decisions[key];
       if (!decision) continue;
       const updated = await memberStore.resolveMemberCampaign(decision);
-      if (updated?.campaign && key !== silentKey) {
+      if (updated?.adsCampaign?.adId && key !== silentKey) {
         try { await onResolved(updated); }
         catch { logger.error('Failed to notify owner about a resolved ad campaign.'); }
       }

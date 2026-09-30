@@ -22,6 +22,7 @@ async function harness(t, { sources = true, ads = true } = {}) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const memberPath = path.join(directory, 'members.json');
   let hour = 0;
+  let notificationTime = Date.parse(at(1));
   let counts = {};
   let actions = { 1: 10, 2: 20 };
   const messages = [];
@@ -33,6 +34,7 @@ async function harness(t, { sources = true, ads = true } = {}) {
     const memberStore = createMemberStore(memberPath);
     const bot = createBot({ ...config, sourceStatistics: sources ? {} : undefined, adsStatistics: ads ? {} : undefined }, {
       memberStore,
+      notificationNow: () => notificationTime,
       urlPromosStore: createUrlPromosStore(path.join(directory, 'url-promos.json')),
       statisticsStore: createSourceStatisticsStore(config.channelId, path.join(directory, 'sources.json')),
       adsStatisticsStore: createAdsStatisticsStore(config.channelId, path.join(directory, 'ads.json')),
@@ -83,6 +85,7 @@ async function harness(t, { sources = true, ads = true } = {}) {
     setActions: value => { actions = value; },
     failSends: count => { sendFailures = count; },
     failSources: error => { sourceFailure = error; },
+    setNotificationTime: value => { notificationTime = value; },
     restart: async () => {
       await current.bot.sourceStatistics?.stop();
       await current.bot.adsStatistics?.stop();
@@ -100,12 +103,21 @@ function joinUpdate(id = 345, hour = 1) {
   } };
 }
 
+function sourceReply(text, messageId = 1, fromId = Number(config.ownerId)) {
+  return { update_id: 900 + messageId, message: {
+    message_id: 200 + messageId, date: Date.parse(at(1)) / 1000 + 301,
+    from: { id: fromId, is_bot: false, first_name: 'Owner' },
+    chat: { id: fromId, type: 'private' }, text, reply_to_message: { message_id: messageId },
+  } };
+}
+
 test('join format includes campaigns for Ads and URL only', () => {
-  const member = { name: 'Анна Иванова', username: 'anna', source: { type: 'ads' }, campaign: { title: 'Новая кампания' } };
+  const member = { name: 'Анна Иванова', username: 'anna', source: { type: 'ads' }, adsCampaign: { title: 'Новая кампания' } };
   assert.equal(formatJoinNotification(member), `${headline}\nИмя: Анна Иванова (@anna)\nИсточник: Ads (Новая кампания)`);
   for (const [type, label] of Object.entries({ url: 'URL', search: 'Search', pm: 'PM',
     chat_folder: 'Shareable Chat Folders', invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'Неизвестно' })) {
-    assert.equal(formatJoinNotification({ ...member, username: null, source: { type } }),
+    assert.equal(formatJoinNotification({ ...member, username: null, source: { type },
+      ...(type === 'url' ? { urlCampaign: { title: 'Новая кампания' } } : {}) }),
       `${headline}\nИмя: Анна Иванова\nИсточник: ${label}${type === 'url' ? ' (Новая кампания)' : ''}`);
   }
   assert.equal(formatJoinNotification({ name: null, source: { type: 'ads' } }),
@@ -148,7 +160,67 @@ test('delayed URL attribution includes an active promo in the single join notifi
   await h.bot.sourceStatistics.checkPending();
   assert.deepEqual(h.messages, [[config.ownerId,
     `${headline}\nИмя: Анна Иванова (@anna)\nИсточник: URL (Фикбук: диалоги)`, messageOptions]]);
-  assert.equal((await h.memberStore.getMember(345, at(1))).campaign.attribution, 'scheduled_url_promo');
+  assert.equal((await h.memberStore.getMember(345, at(1))).urlCampaign.attribution, 'scheduled_url_promo');
+});
+
+test('after five minutes an unknown join is notified once and an owner reply assigns URL promo', async t => {
+  const h = await harness(t);
+  await h.bot.urlPromos.add({ title: 'Статья', startDate: day, days: 1 });
+  await h.bot.handleUpdate(joinUpdate());
+  h.setNotificationTime(Date.parse(at(1)) + 299000);
+  await h.bot.memberNotifications.sendPending();
+  assert.equal(h.messages.length, 0);
+  h.setNotificationTime(Date.parse(at(1)) + 300000);
+  await h.bot.memberNotifications.sendPending();
+  assert.equal(h.messages.length, 1);
+  assert.match(h.messages[0][1], /Источник не удалось определить.*Ответь на это сообщение/);
+  const pending = await h.memberStore.getMember(345, at(1));
+  assert.deepEqual(pending.joinNotification.messageIds, [1]);
+  assert.equal(pending.joinNotification.status, 'sent');
+  await h.bot.memberNotifications.sendPending();
+  assert.equal(h.messages.length, 1);
+  await h.bot.handleUpdate(sourceReply('URL', 1, 456));
+  assert.equal((await h.memberStore.getMember(345, at(1))).source.type, 'unknown');
+  assert.equal(h.messages.length, 1);
+  const restarted = await h.restart();
+  await restarted.bot.handleUpdate(sourceReply('URL'));
+  const updated = await h.memberStore.getMember(345, at(1));
+  assert.equal(updated.source.type, 'url');
+  assert.equal(updated.sourceLookup.status, 'manual');
+  assert.equal(updated.urlCampaign.title, 'Статья');
+  assert.equal(updated.adsCampaign, undefined);
+  assert.match(h.messages[1][1], /Кампания: Статья/);
+  await restarted.bot.sourceStatistics.checkPending();
+  assert.equal(h.messages.length, 2);
+});
+
+test('replying Ads runs the Ads campaign matcher after a timed-out source', async t => {
+  const h = await harness(t);
+  await h.bot.handleUpdate(joinUpdate());
+  h.setNotificationTime(Date.parse(at(1)) + 300000);
+  await h.bot.memberNotifications.sendPending();
+  h.setActions({ 1: 11, 2: 20 });
+  await h.bot.handleUpdate(sourceReply('Ads'));
+  const member = await h.memberStore.getMember(345, at(1));
+  assert.equal(member.source.type, 'ads');
+  assert.equal(member.adsCampaign.adId, 1);
+  assert.equal(member.adsCampaign.title, 'Кампания 1');
+  assert.match(h.messages[1][1], /Кампания: Кампания 1/);
+});
+
+test('a manually assigned Ads source reports its campaign when statistics update later', async t => {
+  const h = await harness(t);
+  await h.bot.handleUpdate(joinUpdate());
+  h.setNotificationTime(Date.parse(at(1)) + 300000);
+  await h.bot.memberNotifications.sendPending();
+  await h.bot.handleUpdate(sourceReply('Ads'));
+  assert.match(h.messages[1][1], /бот продолжит проверку/);
+  h.setActions({ 1: 11, 2: 20 });
+  await h.bot.adsStatistics.checkPending();
+  assert.match(h.messages[2][1], /Ads-кампания.*Кампания 1/);
+  assert.equal((await h.memberStore.getMember(345, at(1))).adsCampaign.adId, 1);
+  await h.bot.adsStatistics.checkPending();
+  assert.equal(h.messages.length, 3);
 });
 
 test('waits for the campaign after the source is resolved, including concurrent monitor checks', async t => {
@@ -185,7 +257,7 @@ test('ambiguous sources produce one final unknown notification per member', asyn
   h.setCounts({ url: 1, ads: 1 });
   await h.bot.sourceStatistics.checkPending();
   assert.equal(h.messages.length, 2);
-  assert.ok(h.messages.every(([, message]) => message.endsWith('Источник: Неизвестно')));
+  assert.ok(h.messages.every(([, message]) => message.includes('Источник: Неизвестно\nИсточник не удалось определить.')));
   await h.bot.adsStatistics.checkPending();
   await h.bot.sourceStatistics.checkPending();
   assert.equal(h.messages.length, 2);

@@ -7,7 +7,7 @@ const chat = { id: '-1001234567890', username: 'example_channel' };
 const member = {
   name: 'Анна Иванова', username: 'anna',
   addedAt: '2026-09-20T10:00:00.000Z', removedAt: '2026-09-29T22:30:00.000Z',
-  source: { type: 'ads' }, campaign: { title: 'Новая кампания' },
+  source: { type: 'ads' }, adsCampaign: { title: 'Новая кампания' },
   postAtAddition: { messageId: 128, postedAt: '2026-09-20T09:00:00.000Z', preview: 'Пост при вступлении' },
   postAtRemoval: { messageId: 150, preview: 'Пост при выходе' },
 };
@@ -28,7 +28,8 @@ test('omits all history lines when there is no recorded addition date', () => {
 
 test('URL shows its campaign while other non-ad sources do not', () => {
   for (const [type, name] of Object.entries({ url: 'URL', chat_folder: 'Shareable Chat Folders', search: 'Search', pm: 'PM' })) {
-    const message = formatLeaveNotification({ ...member, username: null, source: { type } }, chat);
+    const message = formatLeaveNotification({ ...member, username: null, source: { type },
+      ...(type === 'url' ? { urlCampaign: { title: 'Новая кампания' } } : {}) }, chat);
     assert.equal(message.split('\n')[2], 'Имя: Анна Иванова');
     assert.equal(message.split('\n')[3], `Источник: ${name}${type === 'url' ? ' (Новая кампания)' : ''}`);
     if (type !== 'url') assert.ok(!message.includes('Новая кампания'));

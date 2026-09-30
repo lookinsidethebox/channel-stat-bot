@@ -26,8 +26,8 @@ function formatMemberName(member) {
 function formatMemberSource(member) {
   const source = sourceLabels[member.source?.type] || 'Неизвестно';
   const campaign = member.source?.type === 'ads'
-    ? ` (${member.campaign?.title || 'кампания неизвестна'})`
-    : member.source?.type === 'url' && member.campaign?.title ? ` (${member.campaign.title})` : '';
+    ? ` (${member.adsCampaign?.title || 'кампания неизвестна'})`
+    : member.source?.type === 'url' && member.urlCampaign?.title ? ` (${member.urlCampaign.title})` : '';
   return `${source}${campaign}`;
 }
 
@@ -84,9 +84,10 @@ function formatLeaveNotification(member, chat) {
   return lines.join('\n');
 }
 
-function isJoinNotificationReady(member) {
-  return member.sourceLookup?.status !== 'pending'
-    && (member.source?.type !== 'ads' || member.campaignLookup?.status !== 'pending');
+function isJoinNotificationReady(member, now, attributionTimeoutMs) {
+  const pending = member.sourceLookup?.status === 'pending'
+    || (member.source?.type === 'ads' && member.adsCampaign?.status === 'pending');
+  return !pending || now - Date.parse(member.addedAt) >= attributionTimeoutMs;
 }
 
 function splitNotification(text) {
@@ -120,31 +121,39 @@ function splitNotification(text) {
   return messages;
 }
 
-function createMemberNotifier({ memberStore, sendMessage, channelId, logger = console }) {
+function createMemberNotifier({ memberStore, sendMessage, channelId, logger = console,
+  now = () => Date.now(), attributionTimeoutMs = 5 * 60 * 1000 }) {
   let queue = Promise.resolve();
   const delivered = new Map();
 
   function sendPending() {
     const operation = queue.then(async () => {
       for (const member of await memberStore.getPendingJoinNotifications()) {
-        if (!member.joinNotification.messages && !isJoinNotificationReady(member)) continue;
+        if (!member.joinNotification.messages && !isJoinNotificationReady(member, now(), attributionTimeoutMs)) continue;
         const key = membershipKey(member.userId, member.addedAt);
         try {
           let { messages, sentCount = 0 } = member.joinNotification;
+          let messageIds = member.joinNotification.messageIds || [];
           if (!messages) {
             const history = member.returned ? await memberStore.getMemberHistory(member.userId, member.addedAt) : [];
-            messages = splitNotification(formatJoinNotification(member, history, { id: channelId }));
+            let message = formatJoinNotification(member, history, { id: channelId });
+            if (member.source?.type === 'unknown') {
+              message += '\nИсточник не удалось определить. Ответь на это сообщение: URL, Ads, Search, PM или Chat Folder.';
+            }
+            messages = splitNotification(message);
             if (!await memberStore.prepareJoinNotification(member.userId, member.addedAt, messages)) continue;
           }
-          const acknowledged = delivered.get(key) || 0;
-          if (acknowledged > sentCount) {
-            await memberStore.markJoinNotificationPartSent(member.userId, member.addedAt, acknowledged);
-            sentCount = acknowledged;
+          const acknowledged = delivered.get(key);
+          if (acknowledged?.sentCount > sentCount) {
+            messageIds = acknowledged.messageIds;
+            await memberStore.markJoinNotificationPartSent(member.userId, member.addedAt, acknowledged.sentCount, messageIds);
+            sentCount = acknowledged.sentCount;
           }
           for (let index = sentCount; index < messages.length; index++) {
-            await sendMessage(messages[index]);
-            delivered.set(key, index + 1);
-            await memberStore.markJoinNotificationPartSent(member.userId, member.addedAt, index + 1);
+            const sent = await sendMessage(messages[index]);
+            if (Number.isSafeInteger(sent?.message_id)) messageIds[index] = sent.message_id;
+            delivered.set(key, { sentCount: index + 1, messageIds: [...messageIds] });
+            await memberStore.markJoinNotificationPartSent(member.userId, member.addedAt, index + 1, messageIds);
           }
           await memberStore.markJoinNotified(member.userId, member.addedAt);
           delivered.delete(key);

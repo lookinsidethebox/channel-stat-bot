@@ -3,6 +3,32 @@ const { mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 
 const defaultFilePath = path.join(__dirname, '../../data/channel-members.json');
+const migratedCampaignFields = Symbol('migratedCampaignFields');
+
+function migrateLegacyCampaign(member) {
+  let changed = false;
+  if (Object.hasOwn(member, 'campaignLookup')) {
+    const lookup = member.campaignLookup;
+    if (lookup?.status !== 'not_applicable' || member.source?.type === 'ads') {
+      member.adsCampaign = { ...lookup, ...member.adsCampaign };
+    }
+    delete member.campaignLookup;
+    changed = true;
+  }
+  if (Object.hasOwn(member, 'campaign')) {
+    const campaign = member.campaign;
+    if (member.source?.type === 'ads' || campaign?.adId || campaign?.attribution === 'statistics_delta') {
+      member.adsCampaign = { ...member.adsCampaign, ...campaign };
+    } else if (member.source?.type === 'url' || campaign?.attribution === 'scheduled_url_promo') {
+      member.urlCampaign = campaign;
+    } else {
+      throw new Error('MEMBER_CAMPAIGN_SOURCE_UNKNOWN');
+    }
+    delete member.campaign;
+    changed = true;
+  }
+  return changed;
+}
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -33,7 +59,11 @@ async function readMemberData(filePath) {
       || (data.latestPost != null && !isPost(data.latestPost))) {
       throw new Error(`Invalid member data in ${filePath}; the file was not changed.`);
     }
-    return { ...data, latestPost: data.latestPost ?? null };
+    let migrated = false;
+    for (const member of data.members) if (migrateLegacyCampaign(member)) migrated = true;
+    const result = { ...data, latestPost: data.latestPost ?? null };
+    Object.defineProperty(result, migratedCampaignFields, { value: migrated });
+    return result;
   } catch (error) {
     if (error.code === 'ENOENT') return { latestPost: null, members: [] };
     throw error;
@@ -44,7 +74,7 @@ async function writeMemberData(filePath, data) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporaryPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    await writeFile(temporaryPath, `${JSON.stringify(data, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await rename(temporaryPath, filePath);
   } finally {
     await rm(temporaryPath, { force: true });
@@ -59,7 +89,7 @@ function createMemberStore(filePath = defaultFilePath) {
     const operation = writeQueue.then(async () => {
       const data = await readMemberData(filePath);
       const changed = update(data);
-      if (changed) await writeMemberData(filePath, data);
+      if (changed || data[migratedCampaignFields]) await writeMemberData(filePath, data);
       return changed;
     });
     // Report the failure to the caller without blocking subsequent operations.
@@ -77,6 +107,10 @@ function createMemberStore(filePath = defaultFilePath) {
       data.latestPost = post;
       return true;
     });
+  }
+
+  function migrateCampaignFields() {
+    return updateMemberData(data => data[migratedCampaignFields]);
   }
 
   function recordMemberEvent(event, post = null) {
@@ -112,7 +146,7 @@ function createMemberStore(filePath = defaultFilePath) {
         postAtRemoval: joined ? null : post,
         returned: joined && Boolean(previous),
         ...(joined && event.sourceLookup ? { sourceLookup: event.sourceLookup } : {}),
-        ...(joined && event.campaignLookup ? { campaignLookup: event.campaignLookup } : {}),
+        ...(joined && event.adsCampaign ? { adsCampaign: event.adsCampaign } : {}),
         ...(joined && event.joinNotification ? { joinNotification: event.joinNotification } : {}),
         ...(event.postLookupError ? {
           [joined ? 'postAtAdditionError' : 'postAtRemovalError']: event.postLookupError,
@@ -175,19 +209,43 @@ function createMemberStore(filePath = defaultFilePath) {
     });
   }
 
+  async function getMemberByNotificationMessage(messageId) {
+    await writeQueue;
+    return (await readMemberData(filePath)).members.findLast(member =>
+      member.joinNotification?.status === 'sent'
+      && member.joinNotification.messageIds?.includes(messageId));
+  }
+
+  function setManualSourceByNotification(messageId, type, { adsEnabled = false } = {}) {
+    return updateMemberData(data => {
+      const member = data.members.findLast(entry => entry.joinNotification?.status === 'sent'
+        && entry.joinNotification.messageIds?.includes(messageId));
+      if (!member || member.source?.type !== 'unknown') return false;
+      member.source = { type, name: null, attribution: 'manual', confirmedBy: 'owner' };
+      member.sourceLookup = { status: 'manual', checkedAt: new Date().toISOString() };
+      if (type === 'ads' && adsEnabled) member.adsCampaign = { status: 'pending' };
+      else delete member.adsCampaign;
+      return member;
+    });
+  }
+
   async function getPendingCampaignLookups() {
     await writeQueue;
-    return (await readMemberData(filePath)).members.filter(member => member.campaignLookup?.status === 'pending');
+    return (await readMemberData(filePath)).members.filter(member => member.adsCampaign?.status === 'pending');
   }
 
   function resolveMemberCampaign(decision) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(decision.userId)
         && entry.addedAt === decision.addedAt);
-      if (!member || member.campaignLookup?.status !== 'pending') return false;
-      const eligible = member.source?.type === 'ads' && !member.campaign;
-      if (decision.campaign && eligible) member.campaign = decision.campaign;
-      member.campaignLookup = {
+      if (!member || member.adsCampaign?.status !== 'pending') return false;
+      const eligible = member.source?.type === 'ads' && !member.adsCampaign.adId;
+      if (!eligible && member.source?.type !== 'ads') {
+        delete member.adsCampaign;
+        return member;
+      }
+      member.adsCampaign = {
+        ...(decision.campaign && eligible ? decision.campaign : {}),
         status: decision.campaign && !eligible ? 'not_applicable' : decision.status,
         checkedAt: decision.checkedAt,
         ...(decision.reason ? { reason: decision.reason } : {}),
@@ -200,11 +258,11 @@ function createMemberStore(filePath = defaultFilePath) {
     return updateMemberData(data => {
       let assigned = 0;
       for (const member of data.members) {
-        if (member.source?.type !== 'url' || !member.addedAt || member.campaign) continue;
+        if (member.source?.type !== 'url' || !member.addedAt || member.urlCampaign) continue;
         const date = localDate(member.addedAt);
         const matches = campaigns.filter(item => date >= item.startDate && date < item.endDate);
         if (matches.length !== 1) continue;
-        member.campaign = { id: matches[0].id, title: matches[0].title, attribution: 'scheduled_url_promo' };
+        member.urlCampaign = { id: matches[0].id, title: matches[0].title, attribution: 'scheduled_url_promo' };
         assigned++;
       }
       return assigned;
@@ -220,16 +278,17 @@ function createMemberStore(filePath = defaultFilePath) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
       if (!member || member.joinNotification?.status !== 'pending' || member.joinNotification.messages) return false;
-      member.joinNotification = { status: 'pending', messages, sentCount: 0 };
+      member.joinNotification = { status: 'pending', messages, sentCount: 0, messageIds: [] };
       return true;
     });
   }
 
-  function markJoinNotificationPartSent(userId, addedAt, sentCount) {
+  function markJoinNotificationPartSent(userId, addedAt, sentCount, messageIds = []) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
       if (!member || member.joinNotification?.status !== 'pending') return false;
       member.joinNotification.sentCount = sentCount;
+      member.joinNotification.messageIds = messageIds;
       return true;
     });
   }
@@ -238,12 +297,14 @@ function createMemberStore(filePath = defaultFilePath) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
       if (!member || member.joinNotification?.status !== 'pending') return false;
-      member.joinNotification = { status: 'sent', sentAt: new Date().toISOString() };
+      member.joinNotification = { status: 'sent', sentAt: new Date().toISOString(),
+        messageIds: member.joinNotification.messageIds || [] };
       return true;
     });
   }
 
-  return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember, getMemberAtRemoval,
+  return { recordMemberEvent, saveLatestPost, migrateCampaignFields, getPendingSourceLookups, resolveMemberSource,
+    getMemberByNotificationMessage, setManualSourceByNotification, getMember, getMemberAtRemoval,
     getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }

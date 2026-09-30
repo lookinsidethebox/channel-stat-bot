@@ -17,7 +17,7 @@ const snapshot = (counts, time = instant(12)) => ({ channelId, accountId: 'accou
 });
 const join = (id, source = { type: 'ads', attribution: 'statistics_delta' }) => ({
   action: 'joined', channelId, occurredAt: instant(id), user: { id, name: `User ${id}`, username: null },
-  source, sourceLookup: { status: source.type === 'unknown' ? 'pending' : 'matched' }, campaignLookup: { status: 'pending' },
+  source, sourceLookup: { status: source.type === 'unknown' ? 'pending' : 'matched' }, adsCampaign: { status: 'pending' },
 });
 
 async function harness(t) {
@@ -58,14 +58,18 @@ test('successive campaign increments are attributed, persisted separately and su
     h.setSnapshot(snapshot(values));
     const monitor = h.monitor();
     const result = await monitor.checkJoin(event);
-    assert.equal(result.campaign.adId, adId);
-    assert.equal(result.campaign.attribution, 'statistics_delta');
-    assert.equal(result.campaignLookup.status, 'matched');
+    assert.equal(result.adsCampaign.adId, adId);
+    assert.equal(result.adsCampaign.attribution, 'statistics_delta');
+    assert.equal(result.adsCampaign.status, 'matched');
   }
   assert.equal(h.notifications.length, 0);
   assert.equal((await h.state()).baseline['1'].actions, 12);
   const data = JSON.parse(await fs.readFile(h.memberPath, 'utf8'));
   assert.deepEqual(Object.keys(data).sort(), ['latestPost', 'members']);
+  assert.deepEqual(data.members.map(member => [member.adsCampaign.status, member.adsCampaign.adId]),
+    [['matched', 1], ['matched', 2], ['matched', 1]]);
+  assert.ok(data.members.every(member => !Object.hasOwn(member, 'campaign')
+    && !Object.hasOwn(member, 'campaignLookup') && !Object.hasOwn(member, 'urlCampaign')));
   await h.instance.checkPending();
   assert.equal(h.requests(), 4);
 });
@@ -76,11 +80,11 @@ test('holds counters until the source and Ads counters update, then notifies onc
   await h.members.recordMemberEvent(event);
   h.setSnapshot(snapshot({ 1: 11, 2: 20 }));
   await h.instance.checkJoin(event);
-  assert.equal((await h.member(event)).campaignLookup.status, 'pending');
+  assert.equal((await h.member(event)).adsCampaign.status, 'pending');
   assert.equal((await h.state()).baseline['1'].actions, 10);
   await h.members.resolveMemberSource({ userId: 1, addedAt: event.occurredAt, status: 'matched', source: { type: 'ads' } });
   await h.instance.checkPending();
-  assert.equal((await h.member(event)).campaign.adId, 1);
+  assert.equal((await h.member(event)).adsCampaign.adId, 1);
   await h.instance.checkPending();
   assert.equal(h.notifications.length, 1);
 });
@@ -90,10 +94,10 @@ test('unchanged counters stay pending across UTC midnight', async t => {
   const event = join(1);
   await h.members.recordMemberEvent(event);
   h.setSnapshot(snapshot({ 1: 10, 2: 20 }));
-  assert.equal((await h.instance.checkJoin(event)).campaignLookup.status, 'pending');
+  assert.equal((await h.instance.checkJoin(event)).adsCampaign.status, 'pending');
   h.setSnapshot(snapshot({ 1: 10, 2: 21 }, '2026-09-30T00:00:01.000Z'));
   await h.instance.checkPending();
-  assert.equal((await h.member(event)).campaign.adId, 2);
+  assert.equal((await h.member(event)).adsCampaign.adId, 2);
   assert.equal(Object.keys((await h.state()).days).length, 2);
 });
 
@@ -106,7 +110,7 @@ test('multiple pending Ads members can match one campaign, but a partial update 
   assert.equal((await h.state()).baseline['1'].actions, 10);
   h.setSnapshot(snapshot({ 1: 12, 2: 20 }));
   await h.instance.checkPending();
-  for (const e of events) assert.equal((await h.member(e)).campaign.adId, 1);
+  for (const e of events) assert.equal((await h.member(e)).adsCampaign.adId, 1);
 });
 
 test('mixed campaigns and excess conversions remain unresolved', async t => {
@@ -115,13 +119,13 @@ test('mixed campaigns and excess conversions remain unresolved', async t => {
   h.setSnapshot(snapshot({ 1: 11, 2: 21 }));
   await h.instance.checkPending();
   for (const e of [join(1), join(2)]) {
-    assert.equal((await h.member(e)).campaignLookup.reason, 'ambiguous_delta');
-    assert.equal((await h.member(e)).campaign, undefined);
+    assert.equal((await h.member(e)).adsCampaign.reason, 'ambiguous_delta');
+    assert.equal((await h.member(e)).adsCampaign.adId, undefined);
   }
   const third = join(3);
   await h.members.recordMemberEvent(third);
   h.setSnapshot(snapshot({ 1: 13, 2: 21 }));
-  assert.equal((await h.instance.checkJoin(third)).campaignLookup.reason, 'ambiguous_delta');
+  assert.equal((await h.instance.checkJoin(third)).adsCampaign.reason, 'ambiguous_delta');
 });
 
 test('new/deleted campaigns and corrected counters do not create false attributions', async t => {
@@ -130,7 +134,7 @@ test('new/deleted campaigns and corrected counters do not create false attributi
     const e = join(1);
     await h.members.recordMemberEvent(e);
     h.setSnapshot(snapshot(values));
-    assert.equal((await h.instance.checkJoin(e)).campaignLookup.reason, reason);
+    assert.equal((await h.instance.checkJoin(e)).adsCampaign.reason, reason);
   }
 });
 
@@ -142,8 +146,7 @@ test('does not change manual sources or assign an ad to a URL arrival', async t 
   h.setSnapshot(snapshot({ 1: 11, 2: 20 }));
   const result = await h.instance.checkJoin(e);
   assert.deepEqual(result.source, source);
-  assert.equal(result.campaign, undefined);
-  assert.equal(result.campaignLookup.status, 'not_applicable');
+  assert.equal(result.adsCampaign, undefined);
 });
 
 test('no initial baseline means existing arrivals stay unresolved', async t => {
@@ -152,7 +155,7 @@ test('no initial baseline means existing arrivals stay unresolved', async t => {
   const e = join(1);
   await h.members.recordMemberEvent(e);
   h.setSnapshot(snapshot({ 1: 11, 2: 20 }));
-  assert.equal((await h.instance.checkJoin(e)).campaignLookup.reason, 'no_prior_snapshot');
+  assert.equal((await h.instance.checkJoin(e)).adsCampaign.reason, 'no_prior_snapshot');
 });
 
 test('replays durable decisions after a failure between statistics and member writes', async t => {
@@ -162,12 +165,12 @@ test('replays durable decisions after a failure between statistics and member wr
   h.setSnapshot(snapshot({ 1: 11, 2: 20 }));
   const broken = h.monitor({ ...h.members, resolveMemberCampaign: async () => { throw new Error('disk error'); } });
   await broken.checkPending();
-  assert.equal((await h.member(e)).campaignLookup.status, 'pending');
+  assert.equal((await h.member(e)).adsCampaign.status, 'pending');
   assert.equal((await h.state()).decisions[membershipKey(1, e.occurredAt)].status, 'matched');
   const previousRequests = h.requests();
   h.setSnapshot(new Error('network unavailable'));
   await h.monitor().checkPending();
-  assert.equal((await h.member(e)).campaign.adId, 1);
+  assert.equal((await h.member(e)).adsCampaign.adId, 1);
   assert.equal(h.requests(), previousRequests);
 });
 

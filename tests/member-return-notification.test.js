@@ -8,11 +8,11 @@ const { createMemberNotifier, formatJoinNotification } = require('../src/service
 
 const channel = { id: '-1001234567890' };
 const user = { id: 345, name: 'Анна Иванова', username: 'anna' };
-const returned = { ...user, returned: true, source: { type: 'ads' }, campaign: { title: 'Новая кампания' } };
+const returned = { ...user, returned: true, source: { type: 'ads' }, adsCampaign: { title: 'Новая кампания' } };
 const post = (id, preview) => ({ messageId: id, preview, postedAt: '2026-09-01T00:00:00.000Z' });
 const previous = {
   userId: user.id, addedAt: '2026-09-01T08:15:00.000Z', removedAt: '2026-09-03T10:45:00.000Z',
-  source: { type: 'url' }, campaign: { title: 'URL-кампания' },
+  source: { type: 'url' }, urlCampaign: { title: 'URL-кампания' },
   postAtAddition: post(10, 'Первый пост'), postAtRemoval: post(12, 'Пост при выходе'),
 };
 const currentJoin = {
@@ -22,7 +22,7 @@ const currentJoin = {
 
 test('return template includes every previous period with its own dates, source, posts and duration', () => {
   const second = { ...previous, addedAt: '2026-09-10T13:00:00Z', removedAt: '2026-09-10T17:00:00Z',
-    source: { type: 'ads' }, campaign: { title: 'Предыдущая кампания' },
+    source: { type: 'ads' }, adsCampaign: { title: 'Предыдущая кампания' },
     postAtAddition: post(20, 'Второй пост'), postAtRemoval: post(21, 'Ещё один пост'),
   };
   assert.equal(formatJoinNotification(returned, [previous, second], channel), [

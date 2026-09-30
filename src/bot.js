@@ -4,6 +4,7 @@ const registerChannelMemberController = require('./controllers/channel-member.co
 const registerChannelPostController = require('./controllers/channel-post.controller');
 const registerCampaignLinkController = require('./controllers/campaign-link.controller');
 const registerUrlPromoController = require('./controllers/url-promo.controller');
+const registerManualSourceController = require('./controllers/manual-source.controller');
 const registerStatsController = require('./controllers/stats.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
@@ -25,6 +26,7 @@ const { createReactionStatistics } = require('./services/reaction-statistics.ser
 
 function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
   memberStore = createMemberStore(),
+  notificationNow,
   urlPromosStore = createUrlPromosStore(),
   statisticsStore = createSourceStatisticsStore(channelId),
   statisticsReader,
@@ -38,9 +40,11 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   const channelStatisticsReader = statisticsConfig && (statisticsReader || createTelegramStatisticsReader(statisticsConfig));
   const notifications = createMemberNotifier({
     memberStore, channelId, logger,
+    ...(notificationNow ? { now: notificationNow } : {}),
     sendMessage: message => bot.telegram.sendMessage(ownerId, message, { link_preview_options: { is_disabled: true } }),
   });
   bot.memberNotifications = notifications;
+  bot.migrateCampaignFields = memberStore.migrateCampaignFields;
   bot.urlPromos = createUrlPromosService({ store: urlPromosStore, memberStore });
   const sendPendingJoins = async () => {
     await bot.urlPromos.sync();
@@ -50,6 +54,12 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     bot.adsStatistics = createAdsStatisticsMonitor({
       reader: adsStatisticsReader || createTelegramAdsReader({ ...adsConfig, getChannel: () => bot.telegram.getChat(channelId) }),
       statisticsStore: adsStatisticsStore, memberStore, logger,
+      onResolved: async member => {
+        if (member.source?.attribution !== 'manual' || member.joinNotification?.status !== 'sent') return;
+        await bot.telegram.sendMessage(ownerId,
+          `Ads-кампания для ${member.name || 'подписчика'}: ${member.adsCampaign.title}.`,
+          { link_preview_options: { is_disabled: true } });
+      },
       onChecked: sendPendingJoins,
     });
   }
@@ -93,6 +103,8 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCampaignLinkController(bot, { channelId, logger });
+  registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
+    adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, logger });
   registerUrlPromoController(bot, { urlPromos: bot.urlPromos, logger });
   registerStatsController(bot, {
     logger,

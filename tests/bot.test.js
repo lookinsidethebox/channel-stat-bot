@@ -157,7 +157,7 @@ test('leave notifications use only the latest subscription period after a restar
   const chat = { id: Number(config.channelId), type: 'channel', username: 'example_channel' };
   for (const [time, title, messageId] of [[firstAddedAt, 'Старая кампания', 10], [addedAt, 'Новая кампания', 20]]) {
     await store.recordMemberEvent({ action: 'joined', occurredAt: time, user,
-      source: { type: 'ads' }, campaignLookup: { status: 'pending' },
+      source: { type: 'ads' }, adsCampaign: { status: 'pending' },
     }, { messageId, postedAt: time, preview: `Пост ${messageId}` });
     await store.resolveMemberCampaign({ userId: user.id, addedAt: time, status: 'matched', checkedAt: time,
       campaign: { adId: messageId, title },

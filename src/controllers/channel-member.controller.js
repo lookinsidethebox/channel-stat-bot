@@ -26,7 +26,7 @@ function registerChannelMemberController(bot, {
     }
 
     if (sourceStatistics && event.action === 'joined') event.sourceLookup = { status: 'pending' };
-    if (adsStatistics && event.action === 'joined') event.campaignLookup = { status: 'pending' };
+    if (adsStatistics && event.action === 'joined') event.adsCampaign = { status: 'pending' };
     if (event.action === 'joined') event.joinNotification = { status: 'pending' };
     const saved = await recordMemberEvent(event, post);
     if (!saved) {
