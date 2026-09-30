@@ -36,6 +36,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
+  const getSubscriberCount = () => bot.telegram.callApi('getChatMemberCount', { chat_id: channelId });
   const orderedUpdates = createOrderedChannelUpdatesMiddleware();
   const channelStatisticsReader = statisticsConfig && (statisticsReader || createTelegramStatisticsReader(statisticsConfig));
   const notifications = createMemberNotifier({
@@ -76,7 +77,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     if (!channelStatisticsReader) throw new Error('DAILY_SUMMARY_REQUIRES_USER_SESSION');
     bot.dailySummary = createDailySummaryMonitor({
       reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
-      summaryStore: dailySummaryStore, memberStore, logger,
+      summaryStore: dailySummaryStore, memberStore, getSubscriberCount, logger,
       reactionStatistics: bot.reactionStatistics,
       beforeReport: orderedUpdates.drain,
       sendMessage: text => bot.telegram.sendMessage(ownerId, text, {
@@ -110,7 +111,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     logger,
     getStats: channelStatisticsReader && createStatsReporter({
       channelId, reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
-      summaryStore: dailySummaryStore, memberStore, beforeReport: orderedUpdates.drain,
+      summaryStore: dailySummaryStore, memberStore, getSubscriberCount, beforeReport: orderedUpdates.drain,
       reactionStatistics: bot.reactionStatistics,
     }),
   });

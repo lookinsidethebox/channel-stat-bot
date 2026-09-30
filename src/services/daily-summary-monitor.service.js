@@ -1,7 +1,7 @@
 const { reportWindow, dueReportWindow, formatDailySummary } = require('./daily-summary.service');
 const { buildDailyReport } = require('./stats-report.service');
 
-function createDailySummaryMonitor({ reader, summaryStore, memberStore, sendMessage, reactionStatistics, beforeReport = async () => {},
+function createDailySummaryMonitor({ reader, summaryStore, memberStore, getSubscriberCount, sendMessage, reactionStatistics, beforeReport = async () => {},
   logger = console, now = () => new Date(), retryMs = 60000 }) {
   let queue = Promise.resolve();
   let timer;
@@ -33,7 +33,8 @@ function createDailySummaryMonitor({ reader, summaryStore, memberStore, sendMess
       if (window.sendAt < state.initializedAt || state.reports[window.date]
         || state.legacyActivityReports?.[window.date]?.status === 'sent'
         || state.legacyReactionReports?.[window.date]?.status === 'sent') return;
-      const report = await buildDailyReport({ window, channelId: state.channelId, reader, memberStore, reactionStatistics, beforeReport });
+      const report = await buildDailyReport({ window, channelId: state.channelId, reader, memberStore,
+        getSubscriberCount, reactionStatistics, beforeReport });
       report.text = formatDailySummary(report);
       await summaryStore.prepare(report);
       await sendPending();

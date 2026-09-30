@@ -21,13 +21,16 @@ async function setup(t, instant = '2026-09-29T12:00:00.000Z') {
   const summaryStore = createDailySummaryStore(channelId, filePath);
   const memberStore = createMemberStore(path.join(directory, 'members.json'));
   const requests = [];
+  let subscriberCount = 1234;
   const options = { channelId, summaryStore, memberStore, now: () => new Date(instant),
+    getSubscriberCount: async () => subscriberCount,
     reader: { fetch: async query => {
       requests.push(query);
       return { channelId, posts, previousPosts, fetchedAt: instant };
     } },
   };
-  return { options, summaryStore, memberStore, filePath, requests };
+  return { options, summaryStore, memberStore, filePath, requests,
+    setSubscriberCount: value => { subscriberCount = value; } };
 }
 
 test('stats queries historical cumulative counts even before the first report without displaying current counters or writing an outbox', async t => {
@@ -39,7 +42,7 @@ test('stats queries historical cumulative counts even before the first report wi
   const getStats = createStatsReporter(h.options);
   const text = await getStats();
   assert.match(text, /<b>📈 Статистика за 28\.09\.2026<\/b>/);
-  assert.match(text, /Пользователей добавилось на канал: <b>1<\/b>\nПользователей отписалось: <b>1<\/b>/);
+  assert.match(text, /Пользователей добавилось на канал: <b>1<\/b>\nПользователей отписалось: <b>1<\/b>\nОбщее число подписчиков: <b>1234<\/b>/);
   assert.doesNotMatch(text, /Период:|Счётчики на|Подгорица|11:00/);
   assert.match(text, /<b>Пост:<\/b> &lt;Пост&gt; https:\/\/t\.me\/c\/1234567890\/30/);
   assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
@@ -60,11 +63,12 @@ test('stats reuses an existing pending or sent report and its original daily del
   const getStats = createStatsReporter({ ...h.options,
     memberStore: { countEvents: () => assert.fail('A stored report must not be rebuilt') },
   });
-  for (const status of ['pending', 'sent']) {
+  for (const [status, subscriberCount] of [['pending', 1234], ['sent', 1240]]) {
     if (status === 'sent') await h.summaryStore.markSent(today.date, h.options.now().toISOString());
+    h.setSubscriberCount(subscriberCount);
     const before = await readFile(h.filePath, 'utf8');
     const text = await getStats();
-    assert.match(text, /Пользователей добавилось на канал: <b>7<\/b>\nПользователей отписалось: <b>2<\/b>/);
+    assert.match(text, new RegExp(`Пользователей добавилось на канал: <b>7</b>\\nПользователей отписалось: <b>2</b>\\nОбщее число подписчиков: <b>${subscriberCount}</b>`));
     assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
     assert.match(text, /Количество реакций: <b>5 \(-1\)<\/b>/);
     assert.match(text, /Количество репостов: <b>2 \(\+2\)<\/b>/);

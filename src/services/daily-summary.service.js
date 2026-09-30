@@ -61,11 +61,12 @@ function formatCounter(value, previous, isNew) {
   return `<b>${value} (${delta > 0 ? '+' : ''}${delta})</b>`;
 }
 
-function formatDailySummary({ date, membership, posts, periodStart, channelId, previousPosts = [] }) {
+function formatDailySummary({ date, membership, subscriberCount, posts, periodStart, channelId, previousPosts = [] }) {
   const displayDate = date.split('-').reverse().join('.');
   const lines = [`<b>📈 Статистика за ${escapeHtml(displayDate)}</b>`, '',
     `Пользователей добавилось на канал: <b>${membership.joined}</b>`,
-    `Пользователей отписалось: <b>${membership.left}</b>`, '',
+    `Пользователей отписалось: <b>${membership.left}</b>`,
+    `Общее число подписчиков: <b>${subscriberCount ?? 'нет данных'}</b>`, '',
     '<b>Информация по пяти последним постам</b>'];
   for (const post of posts) {
     const previous = previousPosts.find(entry => entry.messageId === post.messageId);

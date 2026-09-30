@@ -231,6 +231,11 @@ test('the assembled bot reads post counters through the shared reader and sends 
     logger: { log() {}, error: (...args) => errors.push(args) },
   });
   bot.telegram.sendMessage = async (...args) => { sent.push(args); };
+  bot.telegram.callApi = async (method, payload) => {
+    assert.equal(method, 'getChatMemberCount');
+    assert.deepEqual(payload, { chat_id: channelId });
+    return 1234;
+  };
   await bot.dailySummary.checkPending();
   await bot.dailySummary.checkPending();
   await bot.dailySummary.stop();
@@ -241,6 +246,7 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.equal(sent[0][0], config.ownerId);
   assert.match(sent[0][1], /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
   assert.match(sent[0][1], /Пользователей добавилось на канал: <b>3<\/b>/);
+  assert.match(sent[0][1], /Общее число подписчиков: <b>1234<\/b>/);
   assert.match(sent[0][1], /Количество реакций: <b>19<\/b> \(сейчас; нет данных за сутки\)/);
   assert.match(sent[0][1], /<b>Пост:<\/b> &lt;Test&gt; https:\/\/t\.me\/c\/1234567890\/42/);
   assert.deepEqual(sent[0][2], { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
@@ -264,6 +270,11 @@ test('stats is owner-only, accepts an addressed command and works with scheduled
     } },
     logger: { log() {}, error: (...args) => errors.push(args) },
   });
+  bot.telegram.callApi = async (method, payload) => {
+    assert.equal(method, 'getChatMemberCount');
+    assert.deepEqual(payload, { chat_id: channelId });
+    return 1234;
+  };
   bot.botInfo = { id: 999, username: 'test_bot', first_name: 'Test', is_bot: true };
   bot.context.telegram = { sendMessage: async (...args) => replies.push(args) };
   await bot.handleUpdate(textUpdate(456, '/stats'));
@@ -278,6 +289,7 @@ test('stats is owner-only, accepts an addressed command and works with scheduled
     assert.equal(String(recipient), config.ownerId);
     assert.match(text, /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
     assert.match(text, /Пользователей добавилось на канал: <b>3<\/b>/);
+    assert.match(text, /Общее число подписчиков: <b>1234<\/b>/);
     assert.equal(extra.parse_mode, 'HTML');
     assert.deepEqual(extra.link_preview_options, { is_disabled: true });
   }

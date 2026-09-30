@@ -10,7 +10,7 @@ const { createMemberStore } = require('../src/storage/member.store');
 
 const channelId = '-1001234567890';
 const summary = { channelId, ...calendarWindow('2026-09-28'),
-  membership: { joined: 7, left: 2 }, posts: [
+  membership: { joined: 7, left: 2 }, subscriberCount: 1234, posts: [
     { messageId: 30, preview: 'Текст <поста> & ссылка', postedAt: '2026-09-28T08:00:00Z', views: 100, reactions: 5, forwards: 2 },
     { messageId: 20, preview: 'Вчерашний пост', postedAt: '2026-09-27T08:00:00Z', views: 350, reactions: 9, forwards: 5 },
     { messageId: 10, preview: null, postedAt: '2026-09-26T08:00:00Z', views: null, reactions: 0, forwards: 0 },
@@ -37,7 +37,8 @@ test('statistics days stay in UTC while delivery stays at 11:00 Podgorica across
 test('the summary uses bold headings, escaped previews and honest positive, negative and missing deltas', () => {
   const text = formatDailySummary({ ...summary, previousPosts: [{ messageId: 20, views: 300, reactions: 11, forwards: 5 }] });
   assert.equal(text, [
-    '<b>📈 Статистика за 28.09.2026</b>', '', 'Пользователей добавилось на канал: <b>7</b>', 'Пользователей отписалось: <b>2</b>', '',
+    '<b>📈 Статистика за 28.09.2026</b>', '', 'Пользователей добавилось на канал: <b>7</b>', 'Пользователей отписалось: <b>2</b>',
+    'Общее число подписчиков: <b>1234</b>', '',
     '<b>Информация по пяти последним постам</b>', '',
     '<b>Пост:</b> Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
     'Количество просмотров: <b>100 (+100)</b>', 'Количество реакций: <b>5 (+5)</b>', 'Количество репостов: <b>2 (+2)</b>', '',
@@ -61,11 +62,13 @@ async function harness(t) {
   let readFailure;
   let sendFailure = false;
   let requests = 0;
+  let subscriberCount = 1234;
   const messages = [];
   const errors = [];
   let beforeReport = async () => {};
   function monitor(summaryStore = store) {
     return createDailySummaryMonitor({ summaryStore, memberStore: members, now: () => instant,
+      getSubscriberCount: async () => subscriberCount,
       reader: { fetch: async ({ periodStart, periodEnd }) => {
         requests++;
         assert.ok(Date.parse(periodEnd) <= instant.getTime());
@@ -80,6 +83,7 @@ async function harness(t) {
   }
   await store.initialize(instant.toISOString());
   return { filePath, store, members, monitor, messages, errors, requests: () => requests,
+    setSubscriberCount: value => { subscriberCount = value; },
     setTime: time => { instant = new Date(time); }, setPosts: value => { previousPosts = posts; posts = value; },
     failRead: error => { readFailure = error; }, failSend: value => { sendFailure = value; },
     beforeReport: action => { beforeReport = action; },
@@ -109,13 +113,16 @@ test('first activation does not send a stale report and each later day sends onc
   h.setTime('2026-09-29T09:00:00Z');
   await Promise.all([monitor.checkPending(), monitor.checkPending()]);
   assert.equal(h.messages.length, 1);
+  assert.match(h.messages[0], /Общее число подписчиков: <b>1234<\/b>/);
   assert.equal(h.requests(), 1);
   await h.monitor(createDailySummaryStore(channelId, h.filePath)).checkPending();
   assert.equal(h.messages.length, 1);
   h.setTime('2026-09-30T09:00:00Z');
   h.setPosts(summary.posts.map(post => ({ ...post, views: 450, reactions: 10, forwards: 7 })));
+  h.setSubscriberCount(1250);
   await monitor.checkPending();
   assert.equal(h.messages.length, 2);
+  assert.match(h.messages[1], /Общее число подписчиков: <b>1250<\/b>/);
   assert.ok(h.messages[1].includes('Количество просмотров: <b>450 (+350)</b>'));
 });
 
