@@ -12,7 +12,7 @@ const returned = { ...user, returned: true, source: { type: 'ads' }, campaign: {
 const post = (id, preview) => ({ messageId: id, preview, postedAt: '2026-09-01T00:00:00.000Z' });
 const previous = {
   userId: user.id, addedAt: '2026-09-01T08:15:00.000Z', removedAt: '2026-09-03T10:45:00.000Z',
-  source: { type: 'url' }, campaign: { title: 'Не показывать для URL' },
+  source: { type: 'url' }, campaign: { title: 'URL-кампания' },
   postAtAddition: post(10, 'Первый пост'), postAtRemoval: post(12, 'Пост при выходе'),
 };
 const currentJoin = {
@@ -28,7 +28,7 @@ test('return template includes every previous period with its own dates, source,
   assert.equal(formatJoinNotification(returned, [previous, second], channel), [
     '🎉 На канале пользователь-возвращенец!', 'Имя: Анна Иванова (@anna)', 'Источник: Ads (Новая кампания)',
     '', 'Информация о прошлых добавлениях:', '',
-    'Добавился: 01.09.2026 10:15', 'Источник: URL',
+    'Добавился: 01.09.2026 10:15', 'Источник: URL (URL-кампания)',
     'Пришел из-за поста: Первый пост https://t.me/c/1234567890/10',
     'Удалился: 03.09.2026 12:45',
     'Удалился из-за поста: Пост при выходе https://t.me/c/1234567890/12',

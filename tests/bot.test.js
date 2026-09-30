@@ -16,6 +16,7 @@ function createHarness(memberStore, postResponses = []) {
   const postRequests = [];
   const bot = createBot(config, {
     memberStore,
+    urlPromosStore: { read: async () => ({ version: 1, campaigns: [] }) },
     logger: { log() {}, error: (...args) => errors.push(args) },
   });
   bot.botInfo = { id: 999, username: 'test_bot', first_name: 'Test', is_bot: true };

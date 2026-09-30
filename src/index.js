@@ -27,6 +27,7 @@ async function main() {
   try {
     await bot.adsStatistics?.start();
     await bot.sourceStatistics?.start();
+    await bot.urlPromos.sync();
     await bot.memberNotifications.sendPending();
     await bot.reactionStatistics?.start();
     await bot.dailySummary?.start();

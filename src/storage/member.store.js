@@ -196,6 +196,21 @@ function createMemberStore(filePath = defaultFilePath) {
     });
   }
 
+  function assignUrlPromos(campaigns, localDate) {
+    return updateMemberData(data => {
+      let assigned = 0;
+      for (const member of data.members) {
+        if (member.source?.type !== 'url' || !member.addedAt || member.campaign) continue;
+        const date = localDate(member.addedAt);
+        const matches = campaigns.filter(item => date >= item.startDate && date < item.endDate);
+        if (matches.length !== 1) continue;
+        member.campaign = { id: matches[0].id, title: matches[0].title, attribution: 'scheduled_url_promo' };
+        assigned++;
+      }
+      return assigned;
+    });
+  }
+
   async function getPendingJoinNotifications() {
     await writeQueue;
     return (await readMemberData(filePath)).members.filter(member => member.joinNotification?.status === 'pending');
@@ -229,7 +244,7 @@ function createMemberStore(filePath = defaultFilePath) {
   }
 
   return { recordMemberEvent, saveLatestPost, getPendingSourceLookups, resolveMemberSource, getMember, getMemberAtRemoval,
-    getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, getPendingJoinNotifications,
+    getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }
 

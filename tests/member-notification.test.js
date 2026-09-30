@@ -7,6 +7,7 @@ const { createBot } = require('../src/bot');
 const { createMemberStore } = require('../src/storage/member.store');
 const { createSourceStatisticsStore } = require('../src/storage/source-statistics.store');
 const { createAdsStatisticsStore } = require('../src/storage/ads-statistics.store');
+const { createUrlPromosStore } = require('../src/storage/url-promos.store');
 const { emptyCounts } = require('../src/services/source-statistics.service');
 const { formatJoinNotification } = require('../src/services/member-notification.service');
 
@@ -32,6 +33,7 @@ async function harness(t, { sources = true, ads = true } = {}) {
     const memberStore = createMemberStore(memberPath);
     const bot = createBot({ ...config, sourceStatistics: sources ? {} : undefined, adsStatistics: ads ? {} : undefined }, {
       memberStore,
+      urlPromosStore: createUrlPromosStore(path.join(directory, 'url-promos.json')),
       statisticsStore: createSourceStatisticsStore(config.channelId, path.join(directory, 'sources.json')),
       adsStatisticsStore: createAdsStatisticsStore(config.channelId, path.join(directory, 'ads.json')),
       statisticsReader: {
@@ -98,13 +100,13 @@ function joinUpdate(id = 345, hour = 1) {
   } };
 }
 
-test('join format includes the full name and optional username, with only ads showing a campaign', () => {
+test('join format includes campaigns for Ads and URL only', () => {
   const member = { name: 'Анна Иванова', username: 'anna', source: { type: 'ads' }, campaign: { title: 'Новая кампания' } };
   assert.equal(formatJoinNotification(member), `${headline}\nИмя: Анна Иванова (@anna)\nИсточник: Ads (Новая кампания)`);
   for (const [type, label] of Object.entries({ url: 'URL', search: 'Search', pm: 'PM',
     chat_folder: 'Shareable Chat Folders', invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'Неизвестно' })) {
     assert.equal(formatJoinNotification({ ...member, username: null, source: { type } }),
-      `${headline}\nИмя: Анна Иванова\nИсточник: ${label}`);
+      `${headline}\nИмя: Анна Иванова\nИсточник: ${label}${type === 'url' ? ' (Новая кампания)' : ''}`);
   }
   assert.equal(formatJoinNotification({ name: null, source: { type: 'ads' } }),
     `${headline}\nИмя: Без имени\nИсточник: Ads (кампания неизвестна)`);
@@ -135,6 +137,18 @@ test('waits through unchanged source statistics, then sends only the final URL m
   await h.bot.adsStatistics.checkPending();
   assert.equal(h.messages.length, 1);
   assert.deepEqual(h.errors, []);
+});
+
+test('delayed URL attribution includes an active promo in the single join notification', async t => {
+  const h = await harness(t);
+  await h.bot.urlPromos.add({ title: 'Фикбук: диалоги', startDate: day, days: 1 });
+  await h.bot.handleUpdate(joinUpdate());
+  assert.equal(h.messages.length, 0);
+  h.setCounts({ url: 1 });
+  await h.bot.sourceStatistics.checkPending();
+  assert.deepEqual(h.messages, [[config.ownerId,
+    `${headline}\nИмя: Анна Иванова (@anna)\nИсточник: URL (Фикбук: диалоги)`, messageOptions]]);
+  assert.equal((await h.memberStore.getMember(345, at(1))).campaign.attribution, 'scheduled_url_promo');
 });
 
 test('waits for the campaign after the source is resolved, including concurrent monitor checks', async t => {

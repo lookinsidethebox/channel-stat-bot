@@ -3,11 +3,14 @@ const registerMessageController = require('./controllers/message.controller');
 const registerChannelMemberController = require('./controllers/channel-member.controller');
 const registerChannelPostController = require('./controllers/channel-post.controller');
 const registerCampaignLinkController = require('./controllers/campaign-link.controller');
+const registerUrlPromoController = require('./controllers/url-promo.controller');
 const registerStatsController = require('./controllers/stats.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
 const createDebugMemberUpdatesMiddleware = require('./middleware/debug-member-updates.middleware');
 const { createMemberStore } = require('./storage/member.store');
+const { createUrlPromosStore } = require('./storage/url-promos.store');
+const { createUrlPromosService } = require('./services/url-promos.service');
 const { createSourceStatisticsStore } = require('./storage/source-statistics.store');
 const { createSourceStatisticsMonitor } = require('./services/source-statistics-monitor.service');
 const { createTelegramStatisticsReader } = require('./services/telegram-statistics.service');
@@ -22,6 +25,7 @@ const { createReactionStatistics } = require('./services/reaction-statistics.ser
 
 function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
   memberStore = createMemberStore(),
+  urlPromosStore = createUrlPromosStore(),
   statisticsStore = createSourceStatisticsStore(channelId),
   statisticsReader,
   adsStatisticsStore = createAdsStatisticsStore(channelId),
@@ -37,11 +41,16 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     sendMessage: message => bot.telegram.sendMessage(ownerId, message, { link_preview_options: { is_disabled: true } }),
   });
   bot.memberNotifications = notifications;
+  bot.urlPromos = createUrlPromosService({ store: urlPromosStore, memberStore });
+  const sendPendingJoins = async () => {
+    await bot.urlPromos.sync();
+    await notifications.sendPending();
+  };
   if (adsConfig) {
     bot.adsStatistics = createAdsStatisticsMonitor({
       reader: adsStatisticsReader || createTelegramAdsReader({ ...adsConfig, getChannel: () => bot.telegram.getChat(channelId) }),
       statisticsStore: adsStatisticsStore, memberStore, logger,
-      onChecked: notifications.sendPending,
+      onChecked: sendPendingJoins,
     });
   }
   if (statisticsConfig) {
@@ -49,7 +58,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     bot.sourceStatistics = createSourceStatisticsMonitor({
       reader: channelStatisticsReader,
       statisticsStore, memberStore, logger,
-      onChecked: notifications.sendPending,
+      onChecked: sendPendingJoins,
     });
   }
 
@@ -76,7 +85,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     ownerId,
     recordMemberEvent: memberStore.recordMemberEvent,
     getMemberAtRemoval: memberStore.getMemberAtRemoval,
-    notifyJoins: notifications.sendPending,
+    notifyJoins: sendPendingJoins,
     sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics,
     logger,
@@ -84,6 +93,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCampaignLinkController(bot, { channelId, logger });
+  registerUrlPromoController(bot, { urlPromos: bot.urlPromos, logger });
   registerStatsController(bot, {
     logger,
     getStats: channelStatisticsReader && createStatsReporter({

@@ -27,7 +27,7 @@ function formatMemberSource(member) {
   const source = sourceLabels[member.source?.type] || 'Неизвестно';
   const campaign = member.source?.type === 'ads'
     ? ` (${member.campaign?.title || 'кампания неизвестна'})`
-    : '';
+    : member.source?.type === 'url' && member.campaign?.title ? ` (${member.campaign.title})` : '';
   return `${source}${campaign}`;
 }
 

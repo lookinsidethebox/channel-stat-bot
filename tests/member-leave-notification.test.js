@@ -26,12 +26,12 @@ test('omits all history lines when there is no recorded addition date', () => {
   assert.equal(formatLeaveNotification({ name: 'Анна', username: null }, chat), `${headline}\n\nИмя: Анна`);
 });
 
-test('non-ad sources retain their English labels and never show a campaign or empty username parentheses', () => {
+test('URL shows its campaign while other non-ad sources do not', () => {
   for (const [type, name] of Object.entries({ url: 'URL', chat_folder: 'Shareable Chat Folders', search: 'Search', pm: 'PM' })) {
     const message = formatLeaveNotification({ ...member, username: null, source: { type } }, chat);
     assert.equal(message.split('\n')[2], 'Имя: Анна Иванова');
-    assert.equal(message.split('\n')[3], `Источник: ${name}`);
-    assert.ok(!message.includes('Новая кампания'));
+    assert.equal(message.split('\n')[3], `Источник: ${name}${type === 'url' ? ' (Новая кампания)' : ''}`);
+    if (type !== 'url') assert.ok(!message.includes('Новая кампания'));
   }
 });
 
