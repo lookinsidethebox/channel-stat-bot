@@ -103,7 +103,7 @@ test('the stored history excludes other users, the current period and later arri
   assert.equal(history[0].addedAt, previous.addedAt);
   await h.notifier().sendPending();
   assert.equal(h.messages.length, 1);
-  assert.ok(h.messages[0].startsWith('🎉 На канале пользователь-возвращенец!'));
+  assert.ok(h.messages[0].startsWith('🎉 На канале пользователь-возвращенец – Анна Иванова (@anna)'));
   assert.equal(h.messages[0].split('Добавился:').length - 1, 1);
   assert.ok(!h.messages[0].includes('Источник: PM'));
   assert.ok(!h.messages[0].includes('30.09.2026'));

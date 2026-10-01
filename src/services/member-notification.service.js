@@ -84,10 +84,18 @@ function formatLeaveNotification(member, chat) {
   return lines.join('\n');
 }
 
-function isJoinNotificationReady(member, now, attributionTimeoutMs) {
-  const pending = member.sourceLookup?.status === 'pending'
-    || (member.source?.type === 'ads' && member.adsCampaign?.status === 'pending');
-  return !pending || now - Date.parse(member.addedAt) >= attributionTimeoutMs;
+function formatImmediateJoinNotification(member, history, chat) {
+  if (!member.returned) return `🎉 На канале новый пользователь – ${formatMemberName(member)}`;
+  const previous = formatJoinNotification(member, history, chat);
+  return previous.replace(/^🎉 На канале пользователь-возвращенец!\nИмя: [^\n]+\nИсточник: [^\n]+/u,
+    `🎉 На канале пользователь-возвращенец – ${formatMemberName(member)}`);
+}
+
+function formatSourceNotification(member, unknown = false) {
+  const source = member.source?.type === 'ads' && member.adsCampaign?.status === 'pending'
+    ? 'Ads' : formatMemberSource(member);
+  const message = `Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: ${source}`;
+  return unknown ? `${message}\nИсточник не удалось определить. Ответь на это сообщение: URL, Ads, Search, PM или Chat Folder.` : message;
 }
 
 function splitNotification(text) {
@@ -122,24 +130,22 @@ function splitNotification(text) {
 }
 
 function createMemberNotifier({ memberStore, sendMessage, channelId, logger = console,
-  now = () => Date.now(), attributionTimeoutMs = 5 * 60 * 1000 }) {
+  now = () => Date.now(), attributionTimeoutMs = 30 * 60 * 1000 }) {
   let queue = Promise.resolve();
   const delivered = new Map();
+  const deliveredSources = new Map();
+  const deliveredCampaigns = new Map();
 
   function sendPending() {
     const operation = queue.then(async () => {
       for (const member of await memberStore.getPendingJoinNotifications()) {
-        if (!member.joinNotification.messages && !isJoinNotificationReady(member, now(), attributionTimeoutMs)) continue;
         const key = membershipKey(member.userId, member.addedAt);
         try {
           let { messages, sentCount = 0 } = member.joinNotification;
           let messageIds = member.joinNotification.messageIds || [];
           if (!messages) {
             const history = member.returned ? await memberStore.getMemberHistory(member.userId, member.addedAt) : [];
-            let message = formatJoinNotification(member, history, { id: channelId });
-            if (member.source?.type === 'unknown') {
-              message += '\nИсточник не удалось определить. Ответь на это сообщение: URL, Ads, Search, PM или Chat Folder.';
-            }
+            const message = formatImmediateJoinNotification(member, history, { id: channelId });
             messages = splitNotification(message);
             if (!await memberStore.prepareJoinNotification(member.userId, member.addedAt, messages)) continue;
           }
@@ -160,6 +166,42 @@ function createMemberNotifier({ memberStore, sendMessage, channelId, logger = co
         } catch {
           // Retry persistence without sending again if only the state write failed.
           logger.error('Failed to send or save a membership notification.');
+        }
+      }
+      for (const member of await memberStore.getPendingSourceNotifications()) {
+        if (member.joinNotification?.status !== 'sent') continue;
+        const unknown = member.source?.type === 'unknown';
+        if (unknown && (member.sourceNotification.status === 'unknown_sent'
+          || now() - Date.parse(member.addedAt) < attributionTimeoutMs)) continue;
+        const key = membershipKey(member.userId, member.addedAt);
+        const status = unknown ? 'unknown_sent' : 'sent';
+        try {
+          const acknowledged = deliveredSources.get(key);
+          let messageId = acknowledged?.status === status ? acknowledged.messageId : null;
+          if (acknowledged?.status !== status) {
+            const sent = await sendMessage(formatSourceNotification(member, unknown));
+            messageId = sent?.message_id ?? null;
+            deliveredSources.set(key, { status, messageId });
+          }
+          await memberStore.markSourceNotified(member.userId, member.addedAt, status, messageId,
+            status === 'sent' ? member.adsCampaign?.title || null : null);
+          deliveredSources.delete(key);
+        } catch {
+          logger.error('Failed to send or save a membership source notification.');
+        }
+      }
+      for (const member of await memberStore.getPendingCampaignNotifications()) {
+        const key = membershipKey(member.userId, member.addedAt);
+        const title = member.adsCampaign.title;
+        try {
+          if (deliveredCampaigns.get(key) !== title) {
+            await sendMessage(`Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: Ads (${title})`);
+            deliveredCampaigns.set(key, title);
+          }
+          await memberStore.markCampaignNotified(member.userId, member.addedAt, title);
+          deliveredCampaigns.delete(key);
+        } catch {
+          logger.error('Failed to send or save an Ads campaign notification.');
         }
       }
     });

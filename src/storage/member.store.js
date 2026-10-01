@@ -148,6 +148,7 @@ function createMemberStore(filePath = defaultFilePath) {
         ...(joined && event.sourceLookup ? { sourceLookup: event.sourceLookup } : {}),
         ...(joined && event.adsCampaign ? { adsCampaign: event.adsCampaign } : {}),
         ...(joined && event.joinNotification ? { joinNotification: event.joinNotification } : {}),
+        ...(joined && event.sourceNotification ? { sourceNotification: event.sourceNotification } : {}),
         ...(event.postLookupError ? {
           [joined ? 'postAtAdditionError' : 'postAtRemovalError']: event.postLookupError,
         } : {}),
@@ -213,13 +214,13 @@ function createMemberStore(filePath = defaultFilePath) {
     await writeQueue;
     return (await readMemberData(filePath)).members.findLast(member =>
       member.joinNotification?.status === 'sent'
-      && member.joinNotification.messageIds?.includes(messageId));
+      && (member.joinNotification.messageIds?.includes(messageId) || member.sourceNotification?.messageId === messageId));
   }
 
   function setManualSourceByNotification(messageId, type, { adsEnabled = false } = {}) {
     return updateMemberData(data => {
       const member = data.members.findLast(entry => entry.joinNotification?.status === 'sent'
-        && entry.joinNotification.messageIds?.includes(messageId));
+        && (entry.joinNotification.messageIds?.includes(messageId) || entry.sourceNotification?.messageId === messageId));
       if (!member || member.source?.type !== 'unknown') return false;
       member.source = { type, name: null, attribution: 'manual', confirmedBy: 'owner' };
       member.sourceLookup = { status: 'manual', checkedAt: new Date().toISOString() };
@@ -274,6 +275,38 @@ function createMemberStore(filePath = defaultFilePath) {
     return (await readMemberData(filePath)).members.filter(member => member.joinNotification?.status === 'pending');
   }
 
+  async function getPendingSourceNotifications() {
+    await writeQueue;
+    return (await readMemberData(filePath)).members.filter(member =>
+      member.sourceNotification?.status === 'pending' || member.sourceNotification?.status === 'unknown_sent');
+  }
+
+  async function getPendingCampaignNotifications() {
+    await writeQueue;
+    return (await readMemberData(filePath)).members.filter(member => member.sourceNotification?.status === 'sent'
+      && member.source?.type === 'ads' && member.adsCampaign?.title
+      && member.sourceNotification.campaignTitle !== member.adsCampaign.title);
+  }
+
+  function markSourceNotified(userId, addedAt, status, messageId = null, campaignTitle = null) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
+      if (!member || !['pending', 'unknown_sent'].includes(member.sourceNotification?.status)) return false;
+      member.sourceNotification = { status, sentAt: new Date().toISOString(), campaignTitle,
+        ...(Number.isSafeInteger(messageId) ? { messageId } : {}) };
+      return true;
+    });
+  }
+
+  function markCampaignNotified(userId, addedAt, campaignTitle) {
+    return updateMemberData(data => {
+      const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
+      if (!member || member.sourceNotification?.status !== 'sent') return false;
+      member.sourceNotification.campaignTitle = campaignTitle;
+      return true;
+    });
+  }
+
   function prepareJoinNotification(userId, addedAt, messages) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(userId) && entry.addedAt === addedAt);
@@ -306,6 +339,7 @@ function createMemberStore(filePath = defaultFilePath) {
   return { recordMemberEvent, saveLatestPost, migrateCampaignFields, getPendingSourceLookups, resolveMemberSource,
     getMemberByNotificationMessage, setManualSourceByNotification, getMember, getMemberAtRemoval,
     getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
+    getPendingSourceNotifications, getPendingCampaignNotifications, markSourceNotified, markCampaignNotified,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }
 

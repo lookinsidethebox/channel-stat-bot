@@ -55,12 +55,6 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     bot.adsStatistics = createAdsStatisticsMonitor({
       reader: adsStatisticsReader || createTelegramAdsReader({ ...adsConfig, getChannel: () => bot.telegram.getChat(channelId) }),
       statisticsStore: adsStatisticsStore, memberStore, logger,
-      onResolved: async member => {
-        if (member.source?.attribution !== 'manual' || member.joinNotification?.status !== 'sent') return;
-        await bot.telegram.sendMessage(ownerId,
-          `Ads-кампания для ${member.name || 'подписчика'}: ${member.adsCampaign.title}.`,
-          { link_preview_options: { is_disabled: true } });
-      },
       onChecked: sendPendingJoins,
     });
   }
@@ -105,7 +99,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCampaignLinkController(bot, { channelId, logger });
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
-    adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, logger });
+    adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, notifyJoins: sendPendingJoins, logger });
   registerUrlPromoController(bot, { urlPromos: bot.urlPromos, logger });
   registerStatsController(bot, {
     logger,

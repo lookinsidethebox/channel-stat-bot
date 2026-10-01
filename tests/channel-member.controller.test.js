@@ -64,7 +64,7 @@ function createContext({
   };
 }
 
-test('queues a single final notification when a bot joins the configured channel', async () => {
+test('queues immediate join and later source notifications when a bot joins', async () => {
   const { handler, recordedEvents, notificationChecks } = registerHandler();
   const { context, sentMessages } = createContext({
     oldStatus: 'left',
@@ -75,8 +75,9 @@ test('queues a single final notification when a bot joins the configured channel
   await handler(context);
 
   assert.equal(sentMessages.length, 0);
-  assert.equal(notificationChecks(), 1);
+  assert.equal(notificationChecks(), 2);
   assert.equal(recordedEvents[0].joinNotification.status, 'pending');
+  assert.equal(recordedEvents[0].sourceNotification.status, 'pending');
   assert.deepEqual(recordedEvents[0].source, { type: 'invite_link', name: 'test-campaign' });
 });
 
@@ -209,7 +210,7 @@ test('preserves post lookup errors in the event without adding technical details
   assert.equal(sentMessages[0][1], '👎 Подписчик покинул канал! Да и хуй с ним.\n\nИмя: Test');
 });
 
-test('a saved join checks statistics before attempting the final notification', async () => {
+test('a saved join attempts its immediate notification before checking statistics', async () => {
   const calls = [];
   const { handler } = registerHandler({
     recordMemberEvent: async event => { calls.push('save'); assert.equal(event.sourceLookup.status, 'pending'); return true; },
@@ -218,11 +219,11 @@ test('a saved join checks statistics before attempting the final notification', 
   });
   const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
   await handler(context);
-  assert.deepEqual(calls, ['save', 'statistics', 'notify']);
+  assert.deepEqual(calls, ['save', 'notify', 'statistics', 'notify']);
   assert.equal(sentMessages.length, 0);
 });
 
-test('checks both the source and campaign before attempting the final notification', async () => {
+test('checks source and campaign after attempting the immediate notification', async () => {
   const calls = [];
   const { handler } = registerHandler({
     recordMemberEvent: async event => {
@@ -242,7 +243,7 @@ test('checks both the source and campaign before attempting the final notificati
   });
   const { context, sentMessages } = createContext({ oldStatus: 'left', newStatus: 'member' });
   await handler(context);
-  assert.deepEqual(calls, ['save', 'source', 'ads', 'notify']);
+  assert.deepEqual(calls, ['save', 'notify', 'source', 'ads', 'notify']);
   assert.equal(sentMessages.length, 0);
 });
 

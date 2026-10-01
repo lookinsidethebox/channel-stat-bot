@@ -6,7 +6,7 @@ const sources = new Map([
   ['chat folder', 'chat_folder'], ['chat_folder', 'chat_folder'],
 ]);
 
-function registerManualSourceController(bot, { memberStore, sourceStatistics, adsStatistics, urlPromos, logger = console }) {
+function registerManualSourceController(bot, { memberStore, sourceStatistics, adsStatistics, urlPromos, notifyJoins = async () => {}, logger = console }) {
   bot.on('text', async (context, next) => {
     const messageId = context.message.reply_to_message?.message_id;
     if (context.chat?.type !== 'private' || !Number.isSafeInteger(messageId)) return next();
@@ -32,6 +32,7 @@ function registerManualSourceController(bot, { memberStore, sourceStatistics, ad
       try { await adsStatistics?.checkJoin({ user: { id: updated.userId }, occurredAt: updated.addedAt }); }
       catch (error) { logger.error('Failed to match Ads campaign after manual source:', error.message); }
     }
+    await notifyJoins();
     const result = await memberStore.getMember(updated.userId, updated.addedAt);
     if (type === 'url') {
       await context.reply(result.urlCampaign

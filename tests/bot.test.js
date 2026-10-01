@@ -112,7 +112,7 @@ test('fetches existing posts for joins and leaves without receiving channel_post
   assert.equal(members[0].postAtAddition.preview, 'Original post');
   assert.equal(members[0].postAtRemoval.preview, 'Edited post');
   assert.equal(latestPost.preview, 'Edited post');
-  assert.equal(sentMessages.length, 2);
+  assert.equal(sentMessages.length, 3);
   assert.equal(postRequests.length, 3);
   assert.ok(sentMessages.every(([recipient]) => recipient === config.ownerId));
   assert.deepEqual(errors, []);
