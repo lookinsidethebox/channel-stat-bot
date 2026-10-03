@@ -16,22 +16,22 @@ const summary = { channelId, ...calendarWindow('2026-09-28'),
     { messageId: 10, preview: null, postedAt: '2026-09-26T08:00:00Z', views: null, reactions: 0, forwards: 0 },
   ] };
 
-test('statistics days stay in UTC while delivery stays at 11:00 Podgorica across daylight-saving transitions', () => {
-  assert.equal(scheduledAt('2026-09-29'), '2026-09-29T09:00:00.000Z');
-  assert.equal(scheduledAt('2026-12-29'), '2026-12-29T10:00:00.000Z');
+test('statistics days stay in UTC while delivery stays at 06:00 Podgorica across daylight-saving transitions', () => {
+  assert.equal(scheduledAt('2026-09-29'), '2026-09-29T04:00:00.000Z');
+  assert.equal(scheduledAt('2026-12-29'), '2026-12-29T05:00:00.000Z');
   for (const date of ['2026-03-29', '2026-10-25']) {
     const window = calendarWindow(date);
     assert.equal(window.date, date);
     assert.equal((Date.parse(window.periodEnd) - Date.parse(window.periodStart)) / 3600000, 24);
     assert.equal(window.periodStart, `${date}T00:00:00.000Z`);
   }
-  assert.equal(reportWindow(new Date('2026-09-29T08:59:59Z')).date, '2026-09-28');
-  assert.equal(reportWindow(new Date('2026-09-29T09:00:00Z')).date, '2026-09-28');
+  assert.equal(reportWindow(new Date('2026-09-29T03:59:59Z')).date, '2026-09-28');
+  assert.equal(reportWindow(new Date('2026-09-29T04:00:00Z')).date, '2026-09-28');
   assert.equal(reportWindow(new Date('2026-09-28T22:00:00Z')).date, '2026-09-27');
   assert.equal(reportWindow(new Date('2026-09-29T00:00:00Z')).date, '2026-09-28');
-  assert.equal(reportWindow(new Date('2026-09-28T22:00:00Z')).nextAt, '2026-09-29T09:00:00.000Z');
-  assert.equal(dueReportWindow(new Date('2026-09-29T08:59:59Z')).date, '2026-09-27');
-  assert.equal(dueReportWindow(new Date('2026-09-29T09:00:00Z')).date, '2026-09-28');
+  assert.equal(reportWindow(new Date('2026-09-28T22:00:00Z')).nextAt, '2026-09-29T04:00:00.000Z');
+  assert.equal(dueReportWindow(new Date('2026-09-29T03:59:59Z')).date, '2026-09-27');
+  assert.equal(dueReportWindow(new Date('2026-09-29T04:00:00Z')).date, '2026-09-28');
 });
 
 test('the summary uses bold headings, escaped previews and honest positive, negative and missing deltas', () => {
@@ -107,17 +107,17 @@ test('first activation does not send a stale report and each later day sends onc
   const h = await harness(t);
   const monitor = h.monitor();
   await monitor.checkPending();
-  h.setTime('2026-09-29T08:59:59Z');
+  h.setTime('2026-09-29T03:59:59Z');
   await monitor.checkPending();
   assert.equal(h.requests(), 0);
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   await Promise.all([monitor.checkPending(), monitor.checkPending()]);
   assert.equal(h.messages.length, 1);
   assert.match(h.messages[0], /Общее число подписчиков: <b>1234<\/b>/);
   assert.equal(h.requests(), 1);
   await h.monitor(createDailySummaryStore(channelId, h.filePath)).checkPending();
   assert.equal(h.messages.length, 1);
-  h.setTime('2026-09-30T09:00:00Z');
+  h.setTime('2026-09-30T04:00:00Z');
   h.setPosts(summary.posts.map(post => ({ ...post, views: 450, reactions: 10, forwards: 7 })));
   h.setSubscriberCount(1250);
   await monitor.checkPending();
@@ -130,12 +130,12 @@ test('waits for queued channel updates before counting membership events', async
   const h = await harness(t);
   h.beforeReport(() => h.members.recordMemberEvent({ action: 'joined', occurredAt: '2026-09-28T21:59:00.000Z',
     user: { id: 1, name: 'Test', username: null }, source: { type: 'url' } }));
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   await h.monitor().checkPending();
   assert.ok(h.messages[0].includes('Пользователей добавилось на канал: <b>1</b>'));
 });
 
-test('the running timer fires at 11:00, schedules the next check and stops without further sends', async t => {
+test('the running timer fires at 06:00, schedules the next check and stops without further sends', async t => {
   const h = await harness(t);
   const timers = [];
   let cleared;
@@ -145,18 +145,18 @@ test('the running timer fires at 11:00, schedules the next check and stops witho
     return timer;
   });
   t.mock.method(global, 'clearTimeout', timer => { cleared = timer; });
-  h.setTime('2026-09-29T08:59:59Z');
+  h.setTime('2026-09-29T03:59:59Z');
   const monitor = h.monitor();
   await monitor.start();
   assert.equal(timers[0].delay, 1000);
   assert.equal(h.messages.length, 0);
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   await timers[0].callback();
   assert.equal(h.messages.length, 1);
   assert.equal(timers[1].delay, 60000);
   await monitor.stop();
   assert.equal(cleared, timers[1]);
-  h.setTime('2026-09-30T09:00:00Z');
+  h.setTime('2026-09-30T04:00:00Z');
   await timers[1].callback();
   assert.equal(h.messages.length, 1);
   assert.equal(timers.length, 2);
@@ -164,7 +164,7 @@ test('the running timer fires at 11:00, schedules the next check and stops witho
 
 test('a failed send replays the persisted report after restart without fetching newer counters', async t => {
   const h = await harness(t);
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   h.failSend(true);
   await h.monitor().checkPending();
   const pending = (await h.store.getState()).reports['2026-09-28'];
@@ -181,12 +181,12 @@ test('a failed acknowledgement retries saving without sending a duplicate in the
   const h = await harness(t);
   const save = h.store.markSent;
   h.store.markSent = async () => { throw new Error('Disk full'); };
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   const monitor = h.monitor();
   await monitor.checkPending();
   assert.equal(h.messages.length, 1);
   h.store.markSent = save;
-  h.setTime('2026-09-29T09:01:00Z');
+  h.setTime('2026-09-29T04:01:00Z');
   await monitor.checkPending();
   assert.equal(h.messages.length, 1);
   assert.equal((await h.store.getState()).reports['2026-09-28'].status, 'sent');
@@ -194,16 +194,16 @@ test('a failed acknowledgement retries saving without sending a duplicate in the
 
 test('request failures respect FLOOD_WAIT and do not persist fabricated zero counters', async t => {
   const h = await harness(t);
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   h.failRead(Object.assign(new Error('FLOOD_WAIT'), { retryAfterSeconds: 120 }));
   const monitor = h.monitor();
   await monitor.checkPending();
   assert.equal(h.messages.length, 0);
   assert.deepEqual((await h.store.getState()).reports, {});
-  h.setTime('2026-09-29T09:01:00Z');
+  h.setTime('2026-09-29T04:01:00Z');
   await monitor.checkPending();
   assert.equal(h.requests(), 1);
-  h.setTime('2026-09-29T09:02:00Z');
+  h.setTime('2026-09-29T04:02:00Z');
   h.failRead(null);
   await monitor.checkPending();
   assert.equal(h.messages.length, 1);
@@ -212,9 +212,9 @@ test('request failures respect FLOOD_WAIT and do not persist fabricated zero cou
 test('after missed deliveries the latest calendar day uses historical API totals at both day boundaries', async t => {
   const h = await harness(t);
   const monitor = h.monitor();
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   await monitor.checkPending();
-  h.setTime('2026-10-02T11:00:00Z');
+  h.setTime('2026-10-02T04:00:00Z');
   h.setPosts(summary.posts.map(post => ({ ...post, views: 150 })));
   await monitor.checkPending();
   assert.equal(h.messages.length, 2);
@@ -226,7 +226,7 @@ test('a corrupt state file or another channel is preserved and cannot reset deli
   const h = await harness(t);
   await assert.rejects(createDailySummaryStore('-1009876543210', h.filePath).getState(), /INVALID_STATE/);
   await writeFile(h.filePath, '{broken');
-  h.setTime('2026-09-29T09:00:00Z');
+  h.setTime('2026-09-29T04:00:00Z');
   await h.monitor().checkPending();
   assert.equal(await readFile(h.filePath, 'utf8'), '{broken');
   assert.equal(h.messages.length, 0);
@@ -243,7 +243,7 @@ test('legacy 11:00 reports are preserved separately and never replayed or reused
   assert.equal(migrated.version, 4);
   assert.deepEqual(migrated.reports, {});
   assert.equal(await readFile(h.filePath, 'utf8'), raw);
-  h.setTime('2026-09-29T09:00:00.000Z');
+  h.setTime('2026-09-29T04:00:00.000Z');
   await h.monitor().checkPending();
   assert.equal(h.messages.length, 1);
   assert.match(h.messages[0], /Статистика за 28\.09\.2026/);
@@ -261,7 +261,7 @@ for (const version of [2, 3]) for (const status of ['pending', 'sent']) {
     const legacyReports = { '2026-09-27': { text: 'Older 11:00 report' } };
     await writeFile(h.filePath, JSON.stringify({ version, channelId, initializedAt: '2026-09-28T10:00:00.000Z',
       legacyReports, reports: { [legacy.date]: legacy } }));
-    h.setTime('2026-09-29T09:00:00.000Z');
+    h.setTime('2026-09-29T04:00:00.000Z');
     await h.monitor().checkPending();
     assert.equal(h.messages.length, status === 'sent' ? 0 : 1);
     assert.equal(h.requests(), status === 'sent' ? 0 : 1);
@@ -270,7 +270,7 @@ for (const version of [2, 3]) for (const status of ['pending', 'sent']) {
       assert.match(h.messages[0], /Количество просмотров: <b>100 \(\+100\)<\/b>/);
       assert.equal((await h.store.getState()).reports[legacy.date].kind, 'calendar_totals_reactions');
     }
-    h.setTime('2026-09-30T09:00:00.000Z');
+    h.setTime('2026-09-30T04:00:00.000Z');
     await h.monitor().checkPending();
     const saved = JSON.parse(await readFile(h.filePath, 'utf8'));
     assert.equal(saved.version, 4);

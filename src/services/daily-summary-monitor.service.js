@@ -63,7 +63,7 @@ function createDailySummaryMonitor({ reader, summaryStore, memberStore, getSubsc
   return {
     async start() {
       await summaryStore.initialize(now().toISOString());
-      logger.log('Daily summary scheduled for 11:00 Europe/Podgorica.');
+      logger.log('Daily summary scheduled for 06:00 Europe/Podgorica.');
       schedule();
     },
     checkPending,

@@ -31,7 +31,7 @@ function localDate(now) {
   return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
 }
 
-const scheduledAt = date => localTimeAt(date, 11);
+const scheduledAt = date => localTimeAt(date, 6);
 
 function calendarWindow(date) {
   // Telegram statistics days are UTC; Podgorica only controls delivery time.

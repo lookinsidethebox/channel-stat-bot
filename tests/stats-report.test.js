@@ -43,7 +43,7 @@ test('stats queries historical cumulative counts even before the first report wi
   const text = await getStats();
   assert.match(text, /<b>📈 Статистика за 28\.09\.2026<\/b>/);
   assert.match(text, /Пользователей добавилось на канал: <b>1<\/b>\nПользователей отписалось: <b>1<\/b>\nОбщее число подписчиков: <b>1234<\/b>/);
-  assert.doesNotMatch(text, /Период:|Счётчики на|Подгорица|11:00/);
+  assert.doesNotMatch(text, /Период:|Счётчики на|Подгорица|06:00/);
   assert.match(text, /<b>Пост:<\/b> &lt;Пост&gt; https:\/\/t\.me\/c\/1234567890\/30/);
   assert.match(text, /Количество просмотров: <b>100 \(\+30\)<\/b>/);
   assert.deepEqual(h.requests, [reportWindow(h.options.now())]);
@@ -121,8 +121,8 @@ test('stats uses stored midnight counts instead of the newer current count', asy
   assert.match(await getStats(), /Количество реакций: <b>17 \(\+2\)<\/b>/);
 });
 
-test('stats before 11:00 already selects yesterday, including a daylight-saving transition', async t => {
-  const h = await setup(t, '2026-10-26T09:59:59.000Z');
+test('stats before 06:00 already selects yesterday, including a daylight-saving transition', async t => {
+  const h = await setup(t, '2026-10-26T04:59:59.000Z');
   let counted;
   let drained = false;
   const getStats = createStatsReporter({ ...h.options,
