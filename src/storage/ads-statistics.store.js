@@ -47,8 +47,9 @@ function applySnapshot(state, snapshot, members) {
   const ids = Object.keys(snapshot.ads);
   // A newly created ad has an implicit zero baseline. Its first reported join
   // can still identify a pending member if it is the only matching increment.
-  const changedSet = Object.keys(state.baseline).some(id => !snapshot.ads[id]
-    || state.baseline[id].promoteUrl !== snapshot.ads[id].promoteUrl);
+  const changedSet = Object.keys(state.baseline).some(id => snapshot.ads[id]
+    ? state.baseline[id].promoteUrl !== snapshot.ads[id].promoteUrl
+    : state.baseline[id].actions !== 0);
   const delta = Object.fromEntries(ids.map(id => [id, snapshot.ads[id].actions - (state.baseline[id]?.actions || 0)]));
   const corrected = Object.values(delta).some(value => value < 0);
   if (changedSet || corrected) {

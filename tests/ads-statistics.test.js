@@ -126,6 +126,22 @@ test('new campaigns remain eligible while Ads and source statistics update later
   assert.equal((await h.member(event)).adsCampaign.adId, 4);
 });
 
+test('removing a zero-action ad does not hide an increment while source statistics lag', async t => {
+  const h = await harness(t);
+  h.setSnapshot(snapshot({ 1: 10, 2: 20, 3: 0 }));
+  await h.instance.checkPending();
+  const event = join(1, { type: 'unknown' });
+  await h.members.recordMemberEvent(event);
+  h.setSnapshot(snapshot({ 1: 11, 2: 20, 4: 0 }));
+  await h.instance.checkJoin(event);
+  assert.equal((await h.member(event)).adsCampaign.status, 'pending');
+  assert.equal((await h.state()).baseline['1'].actions, 10);
+  await h.members.resolveMemberSource({ userId: 1, addedAt: event.occurredAt,
+    status: 'matched', source: { type: 'ads' } });
+  await h.instance.checkPending();
+  assert.equal((await h.member(event)).adsCampaign.adId, 1);
+});
+
 test('a new campaign with more joins than pending members stays ambiguous', async t => {
   const h = await harness(t);
   const event = join(1);
