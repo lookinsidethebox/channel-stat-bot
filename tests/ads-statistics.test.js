@@ -101,6 +101,39 @@ test('unchanged counters stay pending across UTC midnight', async t => {
   assert.equal(Object.keys((await h.state()).days).length, 2);
 });
 
+test('a new campaign with the sole join increment identifies a pending Ads member', async t => {
+  const h = await harness(t);
+  const event = join(1);
+  await h.members.recordMemberEvent(event);
+  h.setSnapshot(snapshot({ 1: 10, 2: 20, 3: 0, 4: 1, 5: 0 }));
+  assert.equal((await h.instance.checkJoin(event)).adsCampaign.adId, 4);
+  assert.equal((await h.state()).baseline['4'].actions, 1);
+});
+
+test('new campaigns remain eligible while Ads and source statistics update later', async t => {
+  const h = await harness(t);
+  const event = join(1, { type: 'unknown' });
+  await h.members.recordMemberEvent(event);
+  h.setSnapshot(snapshot({ 1: 10, 2: 20, 3: 0, 4: 0, 5: 0 }));
+  await h.instance.checkJoin(event);
+  assert.equal((await h.member(event)).adsCampaign.status, 'pending');
+  h.setSnapshot(snapshot({ 1: 10, 2: 20, 3: 0, 4: 1, 5: 0 }));
+  await h.instance.checkPending();
+  assert.equal((await h.member(event)).adsCampaign.status, 'pending');
+  await h.members.resolveMemberSource({ userId: 1, addedAt: event.occurredAt,
+    status: 'matched', source: { type: 'ads' } });
+  await h.instance.checkPending();
+  assert.equal((await h.member(event)).adsCampaign.adId, 4);
+});
+
+test('a new campaign with more joins than pending members stays ambiguous', async t => {
+  const h = await harness(t);
+  const event = join(1);
+  await h.members.recordMemberEvent(event);
+  h.setSnapshot(snapshot({ 1: 10, 2: 20, 3: 2 }));
+  assert.equal((await h.instance.checkJoin(event)).adsCampaign.reason, 'ambiguous_delta');
+});
+
 test('multiple pending Ads members can match one campaign, but a partial update is not consumed', async t => {
   const h = await harness(t);
   const events = [join(1), join(2)];
@@ -128,8 +161,8 @@ test('mixed campaigns and excess conversions remain unresolved', async t => {
   assert.equal((await h.instance.checkJoin(third)).adsCampaign.reason, 'ambiguous_delta');
 });
 
-test('new/deleted campaigns and corrected counters do not create false attributions', async t => {
-  for (const [values, reason] of [[{ 1: 11, 2: 19 }, 'counters_corrected'], [{ 1: 11, 2: 20, 3: 5 }, 'campaign_set_changed'], [{ 1: 11 }, 'campaign_set_changed']]) {
+test('deleted campaigns and corrected counters do not create false attributions', async t => {
+  for (const [values, reason] of [[{ 1: 11, 2: 19 }, 'counters_corrected'], [{ 1: 11 }, 'campaign_set_changed']]) {
     const h = await harness(t);
     const e = join(1);
     await h.members.recordMemberEvent(e);

@@ -45,8 +45,10 @@ function applySnapshot(state, snapshot, members) {
     else decide(member, member.source?.type === 'unknown' ? 'unresolved' : 'not_applicable', 'source_is_not_ads');
   }
   const ids = Object.keys(snapshot.ads);
-  const changedSet = ids.length !== Object.keys(state.baseline).length
-    || ids.some(id => !state.baseline[id] || state.baseline[id].promoteUrl !== snapshot.ads[id].promoteUrl);
+  // A newly created ad has an implicit zero baseline. Its first reported join
+  // can still identify a pending member if it is the only matching increment.
+  const changedSet = Object.keys(state.baseline).some(id => !snapshot.ads[id]
+    || state.baseline[id].promoteUrl !== snapshot.ads[id].promoteUrl);
   const delta = Object.fromEntries(ids.map(id => [id, snapshot.ads[id].actions - (state.baseline[id]?.actions || 0)]));
   const corrected = Object.values(delta).some(value => value < 0);
   if (changedSet || corrected) {
