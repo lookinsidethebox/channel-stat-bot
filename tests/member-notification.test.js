@@ -156,17 +156,27 @@ test('delayed URL attribution sends a separate update with its promo', async t =
   assert.equal(h.messages.length, 2);
 });
 
-test('Ads source is reported as soon as known and a late campaign gets its own update', async t => {
+test('Ads source waits for its campaign and sends one combined update', async t => {
   const h = await harness(t);
   await h.bot.handleUpdate(joinUpdate());
   h.setCounts({ ads: 1 });
   await h.bot.sourceStatistics.checkPending();
-  assert.deepEqual(h.messages.map(item => item[1]), [immediate, sourceUpdate('Ads')]);
+  assert.deepEqual(h.messages.map(item => item[1]), [immediate]);
+  h.setNotificationTime(Date.parse(at(1)) + 30 * 60000);
+  await h.bot.memberNotifications.sendPending();
+  assert.deepEqual(h.messages.map(item => item[1]), [immediate]);
+  const restarted = await h.restart();
+  await restarted.bot.memberNotifications.sendPending();
+  assert.deepEqual(h.messages.map(item => item[1]), [immediate]);
   h.setActions({ 1: 11, 2: 20 });
-  await h.bot.adsStatistics.checkPending();
-  assert.equal(h.messages[2][1], sourceUpdate('Ads (Кампания 1)'));
-  await h.bot.adsStatistics.checkPending();
-  assert.equal(h.messages.length, 3);
+  await restarted.bot.adsStatistics.checkPending();
+  assert.deepEqual(h.messages.map(item => item[1]), [immediate, sourceUpdate('Ads (Кампания 1)')]);
+  await restarted.bot.adsStatistics.checkPending();
+  assert.equal(h.messages.length, 2);
+  const { sourceNotification } = await h.memberStore.getMember(345, at(1));
+  assert.equal(sourceNotification.status, 'sent');
+  assert.equal(sourceNotification.campaignTitle, 'Кампания 1');
+  assert.equal(sourceNotification.messageId, 2);
 });
 
 test('campaign already known to Ads statistics is reported after its source is identified', async t => {
@@ -174,10 +184,9 @@ test('campaign already known to Ads statistics is reported after its source is i
   h.setCounts({ ads: 1 });
   h.setActions({ 1: 11, 2: 20 });
   await h.bot.handleUpdate(joinUpdate());
-  assert.deepEqual(h.messages.map(item => item[1]), [immediate,
-    sourceUpdate('Ads'), sourceUpdate('Ads (Кампания 1)')]);
+  assert.deepEqual(h.messages.map(item => item[1]), [immediate, sourceUpdate('Ads (Кампания 1)')]);
   await Promise.all([h.bot.sourceStatistics.checkPending(), h.bot.adsStatistics.checkPending()]);
-  assert.equal(h.messages.length, 3);
+  assert.equal(h.messages.length, 2);
 });
 
 test('unknown source prompts only after 30 minutes and a later source still updates', async t => {
@@ -280,10 +289,10 @@ test('a returning member gets the saved history immediately and the campaign lat
   assert.equal(h.messages.length, 1);
   h.setCounts({ ads: 1 });
   await h.bot.sourceStatistics.checkPending();
-  assert.equal(h.messages.length, 2);
+  assert.equal(h.messages.length, 1);
   h.setActions({ 1: 11, 2: 20 });
   await h.bot.adsStatistics.checkPending();
-  assert.equal(h.messages.length, 3);
+  assert.equal(h.messages.length, 2);
   const message = h.messages[0][1];
   assert.ok(message.startsWith('🎉 На канале пользователь-возвращенец – Анна Иванова (@anna)'));
   assert.ok(message.includes('Добавился: 01.09.2026 10:00\nИсточник: URL'));
@@ -292,6 +301,6 @@ test('a returning member gets the saved history immediately and the campaign lat
   assert.ok(message.endsWith('Сколько дней провел на канале: 2'));
   await h.bot.handleUpdate(joinUpdate());
   await h.bot.adsStatistics.checkPending();
-  assert.equal(h.messages.length, 3);
+  assert.equal(h.messages.length, 2);
   assert.deepEqual(h.errors, []);
 });

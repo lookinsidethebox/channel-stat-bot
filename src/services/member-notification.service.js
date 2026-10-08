@@ -92,9 +92,7 @@ function formatImmediateJoinNotification(member, history, chat) {
 }
 
 function formatSourceNotification(member, unknown = false) {
-  const source = member.source?.type === 'ads' && member.adsCampaign?.status === 'pending'
-    ? 'Ads' : formatMemberSource(member);
-  const message = `Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: ${source}`;
+  const message = `Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: ${formatMemberSource(member)}`;
   return unknown ? `${message}\nИсточник не удалось определить. Ответь на это сообщение: URL, Ads, Search, PM или Chat Folder.` : message;
 }
 
@@ -173,6 +171,7 @@ function createMemberNotifier({ memberStore, sendMessage, channelId, logger = co
         const unknown = member.source?.type === 'unknown';
         if (unknown && (member.sourceNotification.status === 'unknown_sent'
           || now() - Date.parse(member.addedAt) < attributionTimeoutMs)) continue;
+        if (member.source?.type === 'ads' && !member.adsCampaign?.title) continue;
         const key = membershipKey(member.userId, member.addedAt);
         const status = unknown ? 'unknown_sent' : 'sent';
         try {
