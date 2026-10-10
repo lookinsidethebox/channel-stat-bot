@@ -12,6 +12,7 @@ async function main() {
       // During connection setup there is no polling loop to stop yet.
       if (error.message !== 'Bot is not running!') throw error;
       await bot.dailySummary?.stop();
+      await bot.monthlySummary?.stop();
       await bot.reactionStatistics?.stop();
       await bot.sourceStatistics?.stop();
       await bot.adsStatistics?.stop();
@@ -32,13 +33,15 @@ async function main() {
     await bot.memberNotifications.sendPending();
     await bot.reactionStatistics?.start();
     await bot.dailySummary?.start();
+    await bot.monthlySummary?.start();
     await bot.launch({
-      allowedUpdates: ['message', 'chat_member', 'channel_post', 'edited_channel_post'],
+      allowedUpdates: ['message', 'callback_query', 'chat_member', 'channel_post', 'edited_channel_post'],
     }, () => {
       console.log('Connected to Telegram. Starting the bot.');
     });
   } finally {
     await bot.dailySummary?.stop();
+    await bot.monthlySummary?.stop();
     await bot.reactionStatistics?.stop();
     await bot.sourceStatistics?.stop();
     await bot.adsStatistics?.stop();

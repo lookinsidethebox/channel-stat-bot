@@ -195,6 +195,36 @@ function createMemberStore(filePath = defaultFilePath) {
       left: members.filter(member => inPeriod(member.removedAt)).length };
   }
 
+  async function summarizePeriod(from, to) {
+    const start = Date.parse(from);
+    const end = Date.parse(to);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new Error('INVALID_MEMBER_EVENT_PERIOD');
+    await writeQueue;
+    const { members } = await readMemberData(filePath);
+    const arrivals = members.filter(member => member.addedAt && Date.parse(member.addedAt) >= start
+      && Date.parse(member.addedAt) < end);
+    const sources = {};
+    const urlCampaigns = new Map();
+    const adsCampaigns = new Map();
+    for (const member of arrivals) {
+      const source = member.source?.type || 'unknown';
+      sources[source] = (sources[source] || 0) + 1;
+      const campaigns = source === 'url' ? urlCampaigns : source === 'ads' ? adsCampaigns : null;
+      const campaign = source === 'url' ? member.urlCampaign : member.adsCampaign;
+      if (campaigns && campaign?.title) {
+        const id = source === 'url' ? campaign.id : campaign.adId;
+        const key = id == null ? `title:${campaign.title}`
+          : source === 'ads' ? `id:${campaign.accountId ?? ''}:${id}` : `id:${id}`;
+        const previous = campaigns.get(key);
+        campaigns.set(key, { title: campaign.title, count: (previous?.count || 0) + 1 });
+      }
+    }
+    return { joined: arrivals.length,
+      left: members.filter(member => member.removedAt && Date.parse(member.removedAt) >= start
+        && Date.parse(member.removedAt) < end).length,
+      sources, urlCampaigns: [...urlCampaigns.values()], adsCampaigns: [...adsCampaigns.values()] };
+  }
+
   function resolveMemberSource(decision) {
     return updateMemberData(data => {
       const member = data.members.find(entry => String(entry.userId) === String(decision.userId)
@@ -338,7 +368,7 @@ function createMemberStore(filePath = defaultFilePath) {
 
   return { recordMemberEvent, saveLatestPost, migrateCampaignFields, getPendingSourceLookups, resolveMemberSource,
     getMemberByNotificationMessage, setManualSourceByNotification, getMember, getMemberAtRemoval,
-    getMemberHistory, countEvents, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
+    getMemberHistory, countEvents, summarizePeriod, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
     getPendingSourceNotifications, getPendingCampaignNotifications, markSourceNotified, markCampaignNotified,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };
 }

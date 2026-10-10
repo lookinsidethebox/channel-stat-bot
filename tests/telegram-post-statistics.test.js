@@ -68,3 +68,21 @@ test('rejects malformed counters and foreign-channel results', async () => {
     await assert.rejects(fetchLatestPostStatistics(reader([[message(10, extra)]]), input, options), /POST_STATISTICS_INVALID/);
   }
 });
+
+test('monthly history includes every post inside the period and reads comment counts', async () => {
+  const start = Date.parse('2026-09-01T00:00:00.000Z') / 1000;
+  const pages = [
+    Array.from({ length: 100 }, (_, index) => message(200 - index, {
+      date: start + 100000, replies: { replies: index },
+    })),
+    [message(100, { date: start + 1, replies: { replies: 9 } }), message(99, { date: start - 1 })],
+  ];
+  const requests = [];
+  const result = await fetchLatestPostStatistics(reader(pages, requests), input, {
+    channelId: options.channelId, since: '2026-09-01T00:00:00.000Z', before: options.before, limit: Infinity,
+  });
+  assert.equal(result.posts.length, 101);
+  assert.equal(result.posts[0].comments, 0);
+  assert.equal(result.posts.at(-1).comments, 9);
+  assert.equal(requests[1].offsetId, 101);
+});

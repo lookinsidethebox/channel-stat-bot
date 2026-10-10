@@ -9,9 +9,12 @@ function counter(value) {
 }
 
 // Read counters without incrementing views or marking messages as read.
-async function fetchLatestPostStatistics(client, inputChannel, { channelId, before }) {
+async function fetchLatestPostStatistics(client, inputChannel, { channelId, before, since, limit = POST_LIMIT }) {
   const cutoff = Date.parse(before) / 1000;
-  if (!Number.isFinite(cutoff)) throw new Error('POST_STATISTICS_INVALID_DATE');
+  const start = since == null ? null : Date.parse(since) / 1000;
+  if (!Number.isFinite(cutoff) || (start !== null && (!Number.isFinite(start) || start >= cutoff))) {
+    throw new Error('POST_STATISTICS_INVALID_DATE');
+  }
   const peer = new Api.InputPeerChannel({ channelId: inputChannel.channelId, accessHash: inputChannel.accessHash });
   const groups = new Map();
   let offsetId = 0;
@@ -21,7 +24,13 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
     }));
     if (!Array.isArray(result.messages)) throw new Error('POST_STATISTICS_INVALID_RESPONSE');
     if (!result.messages.length) break;
+    let reachedStart = false;
     for (const message of result.messages) {
+      if (start !== null && Number.isFinite(message.date) && message.date < start) {
+        reachedStart = true;
+        if (message.groupedId) groups.delete(`album:${message.groupedId}`);
+        continue;
+      }
       if (message.className !== 'Message' || !message.post) continue;
       if (String(message.peerId?.channelId) !== String(inputChannel.channelId)
         || !Number.isSafeInteger(message.id) || message.id <= 0 || !Number.isFinite(message.date)) {
@@ -33,7 +42,7 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
       groups.get(key).push(message);
     }
     // One extra group means all requested posts, including the last album, are complete.
-    if (groups.size > POST_LIMIT || result.messages.length < 100) break;
+    if (reachedStart || groups.size > limit || result.messages.length < 100) break;
     const nextOffset = Math.min(...result.messages.map(message => message.id));
     if (!Number.isSafeInteger(nextOffset) || nextOffset <= 0 || (offsetId && nextOffset >= offsetId)) {
       throw new Error('POST_STATISTICS_INVALID_PAGINATION');
@@ -42,7 +51,7 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
   }
   const posts = [...groups.values()]
     .sort((a, b) => Math.max(...b.map(m => m.id)) - Math.max(...a.map(m => m.id)))
-    .slice(0, POST_LIMIT).map(group => {
+    .slice(0, limit).map(group => {
       group.sort((a, b) => a.id - b.id);
       const first = group[0];
       const reactions = first.reactions?.results || [];
@@ -54,7 +63,8 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
       }, 0);
       return { messageId: first.id, postedAt: new Date(first.date * 1000).toISOString(),
         preview: Array.from(group.find(message => message.message)?.message || '').slice(0, 100).join('') || null,
-        views: counter(first.views), reactions: counter(reactionCount), forwards: counter(first.forwards) };
+        views: counter(first.views), reactions: counter(reactionCount), forwards: counter(first.forwards),
+        comments: counter(first.replies?.replies ?? 0) };
     });
   return { channelId, fetchedAt: new Date().toISOString(), posts };
 }

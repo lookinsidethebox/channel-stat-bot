@@ -5,7 +5,6 @@ const registerChannelPostController = require('./controllers/channel-post.contro
 const registerCampaignLinkController = require('./controllers/campaign-link.controller');
 const registerUrlPromoController = require('./controllers/url-promo.controller');
 const registerManualSourceController = require('./controllers/manual-source.controller');
-const registerStatsController = require('./controllers/stats.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
 const createDebugMemberUpdatesMiddleware = require('./middleware/debug-member-updates.middleware');
@@ -21,10 +20,12 @@ const { createAdsStatisticsMonitor } = require('./services/ads-statistics-monito
 const { createMemberNotifier } = require('./services/member-notification.service');
 const { createDailySummaryStore } = require('./storage/daily-summary.store');
 const { createDailySummaryMonitor } = require('./services/daily-summary-monitor.service');
-const { createStatsReporter } = require('./services/stats-report.service');
+const { createMonthlySummaryStore } = require('./storage/monthly-summary.store');
+const { createMonthlySummaryMonitor } = require('./services/monthly-summary-monitor.service');
+const { createMonthlyReporter } = require('./services/monthly-summary.service');
 const { createReactionStatistics } = require('./services/reaction-statistics.service');
 
-function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false }, {
+function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false, monthlySummary = false }, {
   memberStore = createMemberStore(),
   notificationNow,
   urlPromosStore = createUrlPromosStore(),
@@ -33,6 +34,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   adsStatisticsStore = createAdsStatisticsStore(channelId),
   adsStatisticsReader,
   dailySummaryStore = createDailySummaryStore(channelId),
+  monthlySummaryStore = createMonthlySummaryStore(channelId),
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
@@ -79,6 +81,15 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
       }),
     });
   }
+  if (monthlySummary) {
+    if (!channelStatisticsReader) throw new Error('MONTHLY_SUMMARY_REQUIRES_USER_SESSION');
+    bot.monthlySummary = createMonthlySummaryMonitor({ channelId, reader: channelStatisticsReader,
+      memberStore, summaryStore: monthlySummaryStore, beforeReport: orderedUpdates.drain, logger,
+      sendMessage: text => bot.telegram.sendMessage(ownerId, text, {
+        parse_mode: 'HTML', link_preview_options: { is_disabled: true },
+      }),
+    });
+  }
 
   bot.use(orderedUpdates);
   if (debugMemberUpdates) {
@@ -101,15 +112,13 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, notifyJoins: sendPendingJoins, logger });
   registerUrlPromoController(bot, { urlPromos: bot.urlPromos, logger });
-  registerStatsController(bot, {
+  registerMessageController(bot, {
     logger,
-    getStats: channelStatisticsReader && createStatsReporter({
-      channelId, reader: { fetch: options => channelStatisticsReader.fetchDailyPosts(options) },
-      summaryStore: dailySummaryStore, memberStore, getSubscriberCount, beforeReport: orderedUpdates.drain,
-      reactionStatistics: bot.reactionStatistics,
+    getMonthlyStats: channelStatisticsReader && createMonthlyReporter({
+      channelId, reader: channelStatisticsReader, memberStore, summaryStore: monthlySummaryStore,
+      beforeReport: orderedUpdates.drain,
     }),
   });
-  registerMessageController(bot);
 
   bot.catch((error) => {
     logger.error('Telegram bot error:', error);

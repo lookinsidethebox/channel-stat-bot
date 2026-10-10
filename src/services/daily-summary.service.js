@@ -83,4 +83,4 @@ function formatDailySummary({ date, membership, subscriberCount, posts, periodSt
   return lines.join('\n');
 }
 
-module.exports = { TIME_ZONE, reportWindow, dueReportWindow, calendarWindow, scheduledAt, shiftDate, formatDailySummary };
+module.exports = { TIME_ZONE, localDate, localTimeAt, escapeHtml, reportWindow, dueReportWindow, calendarWindow, scheduledAt, shiftDate, formatDailySummary };

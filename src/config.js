@@ -30,7 +30,11 @@ function loadConfig(env = process.env) {
   if (env.DAILY_SUMMARY_ENABLED === '1' && !config.sourceStatistics) {
     throw new Error('DAILY_SUMMARY_ENABLED requires SOURCE_STATS_ENABLED=1 and an authorized Telegram user session.');
   }
+  if (env.MONTHLY_SUMMARY_ENABLED === '1' && !config.sourceStatistics) {
+    throw new Error('MONTHLY_SUMMARY_ENABLED requires SOURCE_STATS_ENABLED=1 and an authorized Telegram user session.');
+  }
   if (config.sourceStatistics) config.dailySummary = env.DAILY_SUMMARY_ENABLED !== '0';
+  if (config.sourceStatistics) config.monthlySummary = env.MONTHLY_SUMMARY_ENABLED !== '0';
   return config;
 }
 

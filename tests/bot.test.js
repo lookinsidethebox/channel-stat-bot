@@ -253,45 +253,47 @@ test('the assembled bot reads post counters through the shared reader and sends 
   assert.deepEqual(errors, []);
 });
 
-test('stats is owner-only, accepts an addressed command and works with scheduled summaries disabled', async t => {
+test('monthly buttons are owner-only and /stats no longer runs a report', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channel-stat-bot-stats-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const channelId = '-1001234567890';
-  const filePath = path.join(directory, 'summary.json');
+  const filePath = path.join(directory, 'monthly.json');
   const replies = [];
   const errors = [];
   let reads = 0;
   const bot = createBot({ ...config, channelId, sourceStatistics: {}, dailySummary: false }, {
-    dailySummaryStore: createDailySummaryStore(channelId, filePath),
-    memberStore: { countEvents: async () => ({ joined: 3, left: 1 }) },
-    statisticsReader: { fetchDailyPosts: async () => {
+    monthlySummaryStore: require('../src/storage/monthly-summary.store').createMonthlySummaryStore(channelId, filePath),
+    memberStore: { summarizePeriod: async () => ({ joined: 3, left: 1, sources: { ads: 2, url: 1 },
+      adsCampaigns: [], urlCampaigns: [] }) },
+    statisticsReader: { fetchMonthlyPosts: async () => {
       reads++;
       return { channelId, fetchedAt: new Date().toISOString(), posts: [] };
     } },
     logger: { log() {}, error: (...args) => errors.push(args) },
   });
-  bot.telegram.callApi = async (method, payload) => {
-    assert.equal(method, 'getChatMemberCount');
-    assert.deepEqual(payload, { chat_id: channelId });
-    return 1234;
-  };
   bot.botInfo = { id: 999, username: 'test_bot', first_name: 'Test', is_bot: true };
-  bot.context.telegram = { sendMessage: async (...args) => replies.push(args) };
+  bot.context.telegram = { sendMessage: async (...args) => replies.push(args), answerCbQuery: async () => true };
   await bot.handleUpdate(textUpdate(456, '/stats'));
   assert.equal(reads, 0);
   assert.deepEqual(replies, []);
-  for (const command of ['/stats', '/stats@test_bot']) {
-    await bot.handleUpdate(textUpdate(123, command));
-  }
+  await bot.handleUpdate(textUpdate(123, '/stats'));
+  assert.equal(replies[0][1], '✅ Бот работает');
+  assert.ok(replies[0][2].reply_markup.inline_keyboard);
+  const callback = (id, data, updateId) => ({ update_id: updateId, callback_query: {
+    id: `callback-${updateId}`, from: { id }, chat_instance: 'test', data,
+    message: { message_id: 1, date: 1780000000, chat: { id, type: 'private' }, text: '✅ Бот работает' },
+  } });
+  await bot.handleUpdate(callback(456, 'stats_month_current', 2));
+  assert.equal(reads, 0);
+  await bot.handleUpdate(callback(123, 'stats_month_current', 3));
+  await bot.handleUpdate(callback(123, 'stats_month_previous', 4));
   assert.equal(reads, 2);
-  assert.equal(replies.length, 2);
-  for (const [recipient, text, extra] of replies) {
+  assert.equal(replies.length, 3);
+  for (const [recipient, text, extra] of replies.slice(1)) {
     assert.equal(String(recipient), config.ownerId);
-    assert.match(text, /<b>📈 Статистика за \d{2}\.\d{2}\.\d{4}<\/b>/);
     assert.match(text, /Пользователей добавилось на канал: <b>3<\/b>/);
-    assert.match(text, /Общее число подписчиков: <b>1234<\/b>/);
+    assert.match(text, /Ads: <b>2<\/b>/);
     assert.equal(extra.parse_mode, 'HTML');
-    assert.deepEqual(extra.link_preview_options, { is_disabled: true });
   }
   await assert.rejects(readFile(filePath), { code: 'ENOENT' });
   assert.deepEqual(errors, []);

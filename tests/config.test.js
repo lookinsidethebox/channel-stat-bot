@@ -49,6 +49,9 @@ test('daily summaries use the existing user session by default and can be disabl
   const env = { ...validEnv, SOURCE_STATS_ENABLED: '1', TELEGRAM_API_ID: '12345',
     TELEGRAM_API_HASH: '0123456789abcdef0123456789abcdef' };
   assert.equal(loadConfig(env).dailySummary, true);
+  assert.equal(loadConfig(env).monthlySummary, true);
   assert.equal(loadConfig({ ...env, DAILY_SUMMARY_ENABLED: '0' }).dailySummary, false);
+  assert.equal(loadConfig({ ...env, MONTHLY_SUMMARY_ENABLED: '0' }).monthlySummary, false);
   assert.throws(() => loadConfig({ ...validEnv, DAILY_SUMMARY_ENABLED: '1' }), /requires SOURCE_STATS_ENABLED/);
+  assert.throws(() => loadConfig({ ...validEnv, MONTHLY_SUMMARY_ENABLED: '1' }), /requires SOURCE_STATS_ENABLED/);
 });

@@ -37,7 +37,7 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
     inputChannel = undefined;
     if (previous) await previous.destroy();
   }
-  function request(action) {
+  function request(action, timeoutMs = 25000) {
     const operation = queue.then(async () => {
       let timer;
       try {
@@ -46,7 +46,7 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
           return action(client);
         })();
         return await Promise.race([request, new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('SOURCE_STATISTICS_TIMEOUT')), 25000);
+          timer = setTimeout(() => reject(new Error('SOURCE_STATISTICS_TIMEOUT')), timeoutMs);
         })]);
       } catch (error) {
         await disconnect().catch(() => {});
@@ -75,6 +75,11 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
     },
     fetchPosts(options) {
       return request(activeClient => fetchLatestPostStatistics(activeClient, inputChannel, { ...options, channelId }));
+    },
+    fetchMonthlyPosts(options) {
+      return request(activeClient => fetchLatestPostStatistics(activeClient, inputChannel, {
+        channelId, since: options.periodStart, before: options.periodEnd, limit: Infinity,
+      }), 120000);
     },
     fetchDailyPosts(options) {
       return request(activeClient => fetchDailyPostStatistics(activeClient, inputChannel, { ...options, channelId }, statsDc));
