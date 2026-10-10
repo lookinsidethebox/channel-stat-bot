@@ -77,7 +77,8 @@ function formatDailySummary({ date, membership, subscriberCount, posts, periodSt
       `Количество реакций: ${post.reactionPeriod === 'current' && post.reactions != null
         ? `<b>${post.reactions}</b> (сейчас; нет данных за сутки)`
         : formatCounter(post.reactions, previous?.reactions, isNew)}`,
-      `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew)}`);
+      `Количество репостов: ${formatCounter(post.forwards, previous?.forwards, isNew)}`,
+      `Количество комментариев: ${post.comments == null ? 'нет данных' : `<b>${post.comments}</b> (сейчас)`}`);
   }
   if (!posts.length) lines.push('', 'На канале пока нет постов.');
   return lines.join('\n');

@@ -101,7 +101,7 @@ test('the Telegram reader uses historical graphs in the statistics DC, resolves 
       assert.equal(request.offsetDate, Date.parse(window.periodEnd) / 1000);
       return { messages: [new Api.Message({ id: 1, date: start / 1000,
         peerId: new Api.PeerChannel({ channelId: input.channelId }), post: true,
-        message: 'Test', views: 9999, forwards: 0, reactions: { results: [
+        message: 'Test', views: 9999, forwards: 0, replies: { replies: 7 }, reactions: { results: [
           { reaction: new Api.ReactionEmoji({ emoticon: '✍' }), count: 6 },
           { reaction: new Api.ReactionCustomEmoji({ documentId: 123 }), count: 7 },
           { reaction: new Api.ReactionCustomEmoji({ documentId: 456 }), count: 2 },
@@ -122,6 +122,7 @@ test('the Telegram reader uses historical graphs in the statistics DC, resolves 
   assert.equal(result.posts[0].reactions, null);
   assert.equal(result.posts[0].currentReactions, 15);
   assert.equal(result.posts[0].forwards, 0);
+  assert.equal(result.posts[0].comments, 7);
   assert.deepEqual(result.previousPosts, [{ messageId: 1, views: 0, reactions: null, forwards: 0 }]);
   assert.equal(requests.length, 3);
 });

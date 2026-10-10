@@ -11,9 +11,9 @@ const { createMemberStore } = require('../src/storage/member.store');
 const channelId = '-1001234567890';
 const summary = { channelId, ...calendarWindow('2026-09-28'),
   membership: { joined: 7, left: 2 }, subscriberCount: 1234, posts: [
-    { messageId: 30, preview: 'Текст <поста> & ссылка', postedAt: '2026-09-28T08:00:00Z', views: 100, reactions: 5, forwards: 2 },
-    { messageId: 20, preview: 'Вчерашний пост', postedAt: '2026-09-27T08:00:00Z', views: 350, reactions: 9, forwards: 5 },
-    { messageId: 10, preview: null, postedAt: '2026-09-26T08:00:00Z', views: null, reactions: 0, forwards: 0 },
+    { messageId: 30, preview: 'Текст <поста> & ссылка', postedAt: '2026-09-28T08:00:00Z', views: 100, reactions: 5, forwards: 2, comments: 10 },
+    { messageId: 20, preview: 'Вчерашний пост', postedAt: '2026-09-27T08:00:00Z', views: 350, reactions: 9, forwards: 5, comments: 0 },
+    { messageId: 10, preview: null, postedAt: '2026-09-26T08:00:00Z', views: null, reactions: 0, forwards: 0, comments: null },
   ] };
 
 test('statistics days stay in UTC while delivery stays at 06:00 Podgorica across daylight-saving transitions', () => {
@@ -41,11 +41,14 @@ test('the summary uses bold headings, escaped previews and honest positive, nega
     'Общее число подписчиков: <b>1234</b>', '',
     '<b>Информация по пяти последним постам</b>', '',
     '<b>Пост:</b> Текст &lt;поста&gt; &amp; ссылка https://t.me/c/1234567890/30',
-    'Количество просмотров: <b>100 (+100)</b>', 'Количество реакций: <b>5 (+5)</b>', 'Количество репостов: <b>2 (+2)</b>', '',
+    'Количество просмотров: <b>100 (+100)</b>', 'Количество реакций: <b>5 (+5)</b>', 'Количество репостов: <b>2 (+2)</b>',
+    'Количество комментариев: <b>10</b> (сейчас)', '',
     '<b>Пост:</b> Вчерашний пост https://t.me/c/1234567890/20',
-    'Количество просмотров: <b>350 (+50)</b>', 'Количество реакций: <b>9 (-2)</b>', 'Количество репостов: <b>5 (0)</b>', '',
+    'Количество просмотров: <b>350 (+50)</b>', 'Количество реакций: <b>9 (-2)</b>', 'Количество репостов: <b>5 (0)</b>',
+    'Количество комментариев: <b>0</b> (сейчас)', '',
     '<b>Пост:</b> Пост без текста https://t.me/c/1234567890/10',
     'Количество просмотров: нет данных', 'Количество реакций: <b>0</b> (нет данных за вчера)', 'Количество репостов: <b>0</b> (нет данных за вчера)',
+    'Количество комментариев: нет данных',
   ].join('\n'));
   assert.ok(formatDailySummary({ ...summary, posts: [] }).endsWith('На канале пока нет постов.'));
 });
