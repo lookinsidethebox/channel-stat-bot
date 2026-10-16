@@ -135,7 +135,7 @@ test('Telegram command menu is registered only for the owner chat', async t => {
   await bot.registerOwnerCommands();
   assert.deepEqual(calls[0][2], { scope: { type: 'chat', chat_id: 123 } });
   assert.deepEqual(calls[0][1].map(item => item.command), [
-    'start', 'link', 'promo', 'cancel', 'spam_add', 'spam_remove', 'spam_list',
+    'start', 'promo', 'spam_add', 'spam_remove', 'spam_list',
     'block', 'unblock', 'block_list',
   ]);
   assert.deepEqual(calls[1][1], { chatId: 123, menuButton: { type: 'commands' } });
@@ -174,6 +174,49 @@ test('/block does not add an ID or claim success when Telegram rejects the restr
   assert.ok(calls.some(call => call[0] === 'send' && /ID не добавлен/.test(call[2])));
 });
 
+test('/block saves an unknown participant and bans after the first message', async t => {
+  const { bot, store, calls } = await harness(t);
+  bot.context.telegram.callApi = async (method, payload) => {
+    calls.push(['api', method, payload]);
+    if (method === 'restrictChatMember') {
+      const error = new Error('PARTICIPANT_ID_INVALID');
+      error.response = { description: 'Bad Request: PARTICIPANT_ID_INVALID' };
+      throw error;
+    }
+    return true;
+  };
+  await bot.handleUpdate(message(owner, privateChat, '/block 555'));
+  assert.deepEqual((await store.read()).pendingUsers, [555]);
+  await bot.handleUpdate(message(owner, privateChat, '/block_list'));
+  assert.match(calls.at(-1)[2], /555 \(ожидает первого сообщения\)/);
+  await bot.handleUpdate(message(user, group, 'новый комментарий'));
+  assert.ok(calls.some(call => call[0] === 'delete' && call[2] === 7));
+  assert.ok(calls.some(call => call[1] === 'banChatMember' && call[2].user_id === 555));
+  assert.deepEqual((await store.read()).pendingUsers, []);
+  assert.deepEqual((await store.read()).bannedUsers, [555]);
+  assert.deepEqual((await store.read()).profiles[555], { name: 'Nitin', username: 'Nitin' });
+  await bot.handleUpdate(message(owner, privateChat, '/unblock 555'));
+  assert.ok(calls.some(call => call[1] === 'unbanChatMember' && call[2].only_if_banned === true));
+  assert.deepEqual((await store.read()).bannedUsers, []);
+});
+
+test('a failed ban leaves the pending ID for another attempt', async t => {
+  const { bot, store, calls } = await harness(t);
+  await store.pendId(555);
+  bot.context.telegram.callApi = async () => { throw new Error('ban failed'); };
+  await bot.handleUpdate(message(user, group, 'комментарий'));
+  assert.deepEqual((await store.read()).pendingUsers, [555]);
+  assert.ok(calls.some(call => call[0] === 'delete'));
+});
+
+test('/unblock cancels a pending ID without calling Telegram', async t => {
+  const { bot, store, calls } = await harness(t);
+  await store.pendId(555);
+  await bot.handleUpdate(message(owner, privateChat, '/unblock 555'));
+  assert.deepEqual((await store.read()).pendingUsers, []);
+  assert.equal(calls.filter(call => call[0] === 'api').length, 0);
+});
+
 test('/block requires a positive Telegram confirmation', async t => {
   const { bot, store } = await harness(t);
   bot.context.telegram.callApi = async () => false;
@@ -208,12 +251,12 @@ test('version 1 data preserves phrases and ID blocks but discards username rules
   await writeFile(file, JSON.stringify({ version: 1, phrases: ['spam'], blockedUsers: [777],
     blockedUsernames: ['nitin7854'], knownUsers: { nitin7854: 888 } }));
   const store = createAntiSpamStore(file);
-  assert.deepEqual(await store.read(), { version: 3, phrases: ['spam'], blockedUsers: [777], profiles: {} });
+  assert.deepEqual(await store.read(), { version: 4, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], profiles: {} });
   await store.blockId(999);
   const saved = JSON.parse(require('node:fs').readFileSync(file, 'utf8'));
-  assert.deepEqual(saved, { version: 3, phrases: ['spam'], blockedUsers: [777, 999], profiles: {} });
+  assert.deepEqual(saved, { version: 4, phrases: ['spam'], blockedUsers: [777, 999], pendingUsers: [], bannedUsers: [], profiles: {} });
   await writeFile(file, JSON.stringify({ version: 2, phrases: ['spam'], blockedUsers: [777] }));
-  assert.deepEqual(await store.read(), { version: 3, phrases: ['spam'], blockedUsers: [777], profiles: {} });
+  assert.deepEqual(await store.read(), { version: 4, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], profiles: {} });
 });
 
 test('/block_list shows names, optional usernames, and IDs from Telegram', async t => {

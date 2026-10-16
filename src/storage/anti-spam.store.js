@@ -3,7 +3,7 @@ const { mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 
 const defaultPath = path.join(__dirname, '../../data/anti-spam.json');
-const empty = () => ({ version: 3, phrases: [], blockedUsers: [], profiles: {} });
+const empty = () => ({ version: 4, phrases: [], blockedUsers: [], pendingUsers: [], bannedUsers: [], profiles: {} });
 const normalize = value => value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, ' ').trim();
 const validId = value => Number.isSafeInteger(value) && value > 0;
 
@@ -13,17 +13,21 @@ function validProfile(profile) {
 }
 
 function validate(data) {
-  if (!data || ![1, 2, 3].includes(data.version) || !Array.isArray(data.phrases)
+  if (!data || ![1, 2, 3, 4].includes(data.version) || !Array.isArray(data.phrases)
     || !data.phrases.every(value => typeof value === 'string' && value.trim())
     || !Array.isArray(data.blockedUsers) || !data.blockedUsers.every(validId)
-    || (data.version === 3 && (!data.profiles || typeof data.profiles !== 'object'
+    || (data.version === 4 && (!Array.isArray(data.pendingUsers) || !data.pendingUsers.every(validId)
+      || !Array.isArray(data.bannedUsers) || !data.bannedUsers.every(validId)))
+    || (data.version >= 3 && (!data.profiles || typeof data.profiles !== 'object'
       || Array.isArray(data.profiles) || !Object.entries(data.profiles).every(([id, profile]) =>
         validId(Number(id)) && validProfile(profile))))) {
     throw new Error('ANTI_SPAM_INVALID_STATE');
   }
   // Version 1 included username rules. They are deliberately discarded.
-  return { version: 3, phrases: data.phrases, blockedUsers: data.blockedUsers,
-    profiles: data.version === 3 ? data.profiles : {} };
+  return { version: 4, phrases: data.phrases, blockedUsers: data.blockedUsers,
+    pendingUsers: data.version === 4 ? data.pendingUsers : [],
+    bannedUsers: data.version === 4 ? data.bannedUsers : [],
+    profiles: data.version >= 3 ? data.profiles : {} };
 }
 
 function createAntiSpamStore(filePath = defaultPath) {
@@ -74,14 +78,32 @@ function createAntiSpamStore(filePath = defaultPath) {
       if (!validId(id)) throw new Error('ANTI_SPAM_INVALID_USER');
       if (profile !== undefined && !validProfile(profile)) throw new Error('ANTI_SPAM_INVALID_PROFILE');
       return update(data => {
+        data.pendingUsers = data.pendingUsers.filter(value => value !== id);
         if (!data.blockedUsers.includes(id)) data.blockedUsers.push(id);
+        if (profile) data.profiles[id] = profile;
+      });
+    },
+    pendId(id) {
+      if (!validId(id)) throw new Error('ANTI_SPAM_INVALID_USER');
+      return update(data => {
+        if (!data.blockedUsers.includes(id) && !data.bannedUsers.includes(id)
+          && !data.pendingUsers.includes(id)) data.pendingUsers.push(id);
+      });
+    },
+    banId(id, profile) {
+      if (!validId(id)) throw new Error('ANTI_SPAM_INVALID_USER');
+      if (profile !== undefined && !validProfile(profile)) throw new Error('ANTI_SPAM_INVALID_PROFILE');
+      return update(data => {
+        data.pendingUsers = data.pendingUsers.filter(value => value !== id);
+        data.blockedUsers = data.blockedUsers.filter(value => value !== id);
+        if (!data.bannedUsers.includes(id)) data.bannedUsers.push(id);
         if (profile) data.profiles[id] = profile;
       });
     },
     saveProfile(id, profile) {
       if (!validId(id) || !validProfile(profile)) throw new Error('ANTI_SPAM_INVALID_PROFILE');
       return update(data => {
-        if (data.blockedUsers.includes(id)) data.profiles[id] = profile;
+        if ([...data.blockedUsers, ...data.pendingUsers, ...data.bannedUsers].includes(id)) data.profiles[id] = profile;
       });
     },
     unblockId(id) {
@@ -89,6 +111,8 @@ function createAntiSpamStore(filePath = defaultPath) {
       return update(data => {
         const blocked = data.blockedUsers.includes(id);
         data.blockedUsers = data.blockedUsers.filter(value => value !== id);
+        data.pendingUsers = data.pendingUsers.filter(value => value !== id);
+        data.bannedUsers = data.bannedUsers.filter(value => value !== id);
         delete data.profiles[id];
         return blocked;
       });

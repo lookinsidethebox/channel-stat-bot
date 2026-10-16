@@ -64,22 +64,27 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
     try {
       const state = await store.read();
       const blocked = state.blockedUsers.includes(user.id);
+      const pending = state.pendingUsers.includes(user.id);
+      const banned = state.bannedUsers.includes(user.id);
       const content = normalize([message.text, message.caption].filter(Boolean).join(' '));
       const phrase = state.phrases.find(item => content.includes(normalize(item)));
-      if (!blocked && !phrase) return;
+      if (!blocked && !pending && !banned && !phrase) return;
       let restricted = true;
-      if (phrase) {
+      if (phrase || pending || banned) {
+        if (pending) await store.saveProfile(user.id, profileFromMember({ user }, user.id));
         // Ban even if Combot or the author deleted the message first.
         try { await context.telegram.deleteMessage(groupId, message.message_id); }
         catch (error) { logger.error('Anti-spam deletion failed:', error); }
-        await context.telegram.callApi('banChatMember', { chat_id: groupId, user_id: user.id });
+        const result = await context.telegram.callApi('banChatMember', { chat_id: groupId, user_id: user.id });
+        if (result !== true) throw new Error('BAN_CHAT_MEMBER_NOT_CONFIRMED');
+        if (pending) await store.banId(user.id, profileFromMember({ user }, user.id) || undefined);
       } else {
         try { await restrict(context.telegram, user.id); }
         catch (error) { restricted = false; logger.error('Blocked user restriction failed:', error); }
         try { await context.telegram.deleteMessage(groupId, message.message_id); }
         catch (error) { logger.error('Blocked comment deletion failed:', error); }
       }
-      await inform(context.telegram, `${phrase ? '🚫 Спам: пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}, ID ${user.id}.`);
+      await inform(context.telegram, `${phrase || pending || banned ? '🚫 Пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}, ID ${user.id}.`);
     } catch (error) {
       logger.error('Anti-spam moderation failed:', error);
       await inform(context.telegram, `Не удалось обработать сообщение ${message.message_id} в группе комментариев. Проверь права бота и журнал.`);
@@ -164,10 +169,20 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       await context.reply('Укажи числовой ID пользователя: /block 8074667319');
       return;
     }
+    const existing = await store.read();
+    if (existing.pendingUsers.includes(id) || existing.bannedUsers.includes(id)) {
+      await context.reply(`ID ${id} уже есть в списке запрета.`);
+      return;
+    }
     try {
       await restrict(context.telegram, id);
     } catch (error) {
       logger.error('Immediate comment restriction failed:', error);
+      if (error.response?.description?.includes('PARTICIPANT_ID_INVALID')) {
+        await store.pendId(id);
+        await context.reply(`ID ${id} сохранён. Telegram пока не может ограничить пользователя. Если он напишет в группе комментариев, бот удалит сообщение и забанит его.`);
+        return;
+      }
       await context.reply(`Не удалось запретить комментарии для ID ${id}. ID не добавлен в список. Проверь права бота и статус пользователя в группе.`);
       return;
     }
@@ -191,12 +206,13 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
   bot.command('block_list', async context => {
     if (!isOwnerPrivate(context)) return;
     const state = await store.read();
-    if (!state.blockedUsers.length) {
+    const ids = [...new Set([...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers])];
+    if (!ids.length) {
       await context.reply('Список ограниченных пользователей пуст.');
       return;
     }
     const lines = [];
-    for (const id of state.blockedUsers) {
+    for (const id of ids) {
       let profile = state.profiles[String(id)];
       try {
         const current = profileFromMember(await context.telegram.callApi('getChatMember', {
@@ -209,7 +225,9 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       } catch (error) {
         logger.error('Blocked user profile lookup failed:', error);
       }
-      lines.push(formatBlockedUser(id, profile));
+      const status = state.pendingUsers.includes(id) ? ' (ожидает первого сообщения)'
+        : state.bannedUsers.includes(id) ? ' (забанен)' : '';
+      lines.push(`${formatBlockedUser(id, profile)}${status}`);
     }
     let part = 'Запрещено писать в группе:';
     for (const line of lines) {
@@ -228,20 +246,27 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       await context.reply('Укажи числовой ID пользователя: /unblock 8074667319');
       return;
     }
-    if (!(await store.read()).blockedUsers.includes(id)) {
+    const state = await store.read();
+    if (![...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers].includes(id)) {
       await context.reply(`ID ${id} нет в списке ограниченных пользователей.`);
       return;
     }
-    try {
-      const result = await context.telegram.callApi('restrictChatMember', {
-        chat_id: groupId, user_id: id, permissions: ALL_PERMISSIONS,
-        use_independent_chat_permissions: true,
-      });
-      if (result !== true) throw new Error('UNRESTRICT_CHAT_MEMBER_NOT_CONFIRMED');
-    } catch (error) {
-      logger.error('Comment unrestriction failed:', error);
-      await context.reply(`Не удалось вернуть возможность писать пользователю ID ${id}. Он остаётся в списке.`);
-      return;
+    if (!state.pendingUsers.includes(id)) {
+      try {
+        const result = state.bannedUsers.includes(id)
+          ? await context.telegram.callApi('unbanChatMember', {
+            chat_id: groupId, user_id: id, only_if_banned: true,
+          })
+          : await context.telegram.callApi('restrictChatMember', {
+            chat_id: groupId, user_id: id, permissions: ALL_PERMISSIONS,
+            use_independent_chat_permissions: true,
+          });
+        if (result !== true) throw new Error('UNBLOCK_NOT_CONFIRMED');
+      } catch (error) {
+        logger.error('Comment unrestriction failed:', error);
+        await context.reply(`Не удалось вернуть возможность писать пользователю ID ${id}. Он остаётся в списке.`);
+        return;
+      }
     }
     try {
       await store.unblockId(id);
@@ -250,7 +275,9 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       await context.reply(`Telegram разрешил писать пользователю ID ${id}, но не удалось удалить ID из списка бота. Проверь хранилище.`);
       return;
     }
-    await context.reply(`Пользователь ID ${id} снова может писать в группе комментариев.`);
+    await context.reply(state.pendingUsers.includes(id)
+      ? `Отложенный запрет для ID ${id} отменён.`
+      : `Пользователь ID ${id} снова может писать в группе комментариев.`);
   });
   bot.on('text', async (context, next) => {
     if (!awaitingSpamPhrase || !isOwnerPrivate(context)) return next();

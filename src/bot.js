@@ -2,7 +2,6 @@ const { Telegraf } = require('telegraf');
 const registerMessageController = require('./controllers/message.controller');
 const registerChannelMemberController = require('./controllers/channel-member.controller');
 const registerChannelPostController = require('./controllers/channel-post.controller');
-const registerCampaignLinkController = require('./controllers/campaign-link.controller');
 const registerUrlPromoController = require('./controllers/url-promo.controller');
 const registerManualSourceController = require('./controllers/manual-source.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
@@ -44,9 +43,7 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
   bot.registerOwnerCommands = async () => {
     const commands = [
       { command: 'start', description: 'Открыть главное меню бота' },
-      { command: 'link', description: 'Создать ссылку для кампании' },
       { command: 'promo', description: 'Создать URL-кампанию' },
-      { command: 'cancel', description: 'Отменить создание URL-кампании' },
     ];
     if (discussionGroupId) commands.push(
       { command: 'spam_add', description: 'Добавить антиспам-фразу' },
@@ -132,7 +129,6 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
     groupId: discussionGroupId, ownerId, store: antiSpamStore || createAntiSpamStore(), logger,
   });
   bot.use(createOwnerOnlyMiddleware(ownerId));
-  registerCampaignLinkController(bot, { channelId, logger });
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, notifyJoins: sendPendingJoins, logger });
   registerUrlPromoController(bot, { urlPromos: bot.urlPromos, logger });

@@ -11,7 +11,6 @@ const config = { token: 'test-token', ownerId: '123', channelId: '-100456' };
 
 function createHarness(memberStore, postResponses = []) {
   const sentMessages = [];
-  const createdLinks = [];
   const errors = [];
   const postRequests = [];
   const bot = createBot(config, {
@@ -28,13 +27,9 @@ function createHarness(memberStore, postResponses = []) {
       return postResponses.shift() ?? [];
     },
     sendMessage: async (...args) => sentMessages.push(args),
-    createChatInviteLink: async (...args) => {
-      createdLinks.push(args);
-      return { invite_link: 'https://t.me/+test-invite' };
-    },
   };
   bot.telegram.sendMessage = bot.context.telegram.sendMessage;
-  return { bot, sentMessages, createdLinks, errors, postRequests };
+  return { bot, sentMessages, errors, postRequests };
 }
 
 function textUpdate(fromId, text) {
@@ -53,19 +48,13 @@ function textUpdate(fromId, text) {
   };
 }
 
-test('the assembled bot restricts text and link commands to the owner', async () => {
-  const { bot, sentMessages, createdLinks, errors } = createHarness();
+test('the assembled bot replies to the owner and ignores other users', async () => {
+  const { bot, sentMessages, errors } = createHarness();
   await bot.handleUpdate(textUpdate(456, 'Hi'));
-  await bot.handleUpdate(textUpdate(456, '/link campaign'));
   assert.equal(sentMessages.length, 0);
-  assert.equal(createdLinks.length, 0);
 
   await bot.handleUpdate(textUpdate(123, '/start'));
   assert.equal(sentMessages[0][1], '✅ Бот работает');
-  await bot.handleUpdate(textUpdate(123, '/link@test_bot campaign'));
-  assert.deepEqual(createdLinks, [[config.channelId, { name: 'campaign' }]]);
-  assert.equal(sentMessages.length, 2);
-  assert.match(sentMessages[1][1], /https:\/\/t\.me\/\+test-invite/);
   assert.deepEqual(errors, []);
 });
 
