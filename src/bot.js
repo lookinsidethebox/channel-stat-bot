@@ -6,6 +6,8 @@ const registerCampaignLinkController = require('./controllers/campaign-link.cont
 const registerUrlPromoController = require('./controllers/url-promo.controller');
 const registerManualSourceController = require('./controllers/manual-source.controller');
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
+const registerAntiSpamController = require('./controllers/anti-spam.controller');
+const { createAntiSpamStore } = require('./storage/anti-spam.store');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
 const createDebugMemberUpdatesMiddleware = require('./middleware/debug-member-updates.middleware');
 const { createMemberStore } = require('./storage/member.store');
@@ -25,7 +27,7 @@ const { createMonthlySummaryMonitor } = require('./services/monthly-summary-moni
 const { createMonthlyReporter } = require('./services/monthly-summary.service');
 const { createReactionStatistics } = require('./services/reaction-statistics.service');
 
-function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false, monthlySummary = false }, {
+function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUpdates = false, sourceStatistics: statisticsConfig, adsStatistics: adsConfig, dailySummary = false, monthlySummary = false }, {
   memberStore = createMemberStore(),
   notificationNow,
   urlPromosStore = createUrlPromosStore(),
@@ -35,6 +37,7 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
   adsStatisticsReader,
   dailySummaryStore = createDailySummaryStore(channelId),
   monthlySummaryStore = createMonthlySummaryStore(channelId),
+  antiSpamStore,
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
@@ -107,6 +110,9 @@ function createBot({ token, ownerId, channelId, debugMemberUpdates = false, sour
     logger,
   });
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });
+  if (discussionGroupId) registerAntiSpamController(bot, {
+    groupId: discussionGroupId, ownerId, store: antiSpamStore || createAntiSpamStore(), logger,
+  });
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCampaignLinkController(bot, { channelId, logger });
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,

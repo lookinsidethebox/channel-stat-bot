@@ -19,6 +19,14 @@ function loadConfig(env = process.env) {
   }
 
   const config = { token, ownerId, channelId, debugMemberUpdates: env.DEBUG_MEMBER_UPDATES === '1' };
+  const discussionGroupId = env.DISCUSSION_GROUP_ID?.trim();
+  if (discussionGroupId) {
+    if (!/^-[1-9]\d*$/.test(discussionGroupId) || !Number.isSafeInteger(Number(discussionGroupId))
+      || discussionGroupId === channelId) {
+      throw new Error('DISCUSSION_GROUP_ID must be a negative numeric group ID different from CHANNEL_ID.');
+    }
+    config.discussionGroupId = discussionGroupId;
+  }
   if (env.SOURCE_STATS_ENABLED === '1') {
     const { readAuthConfig, getSessionPath } = require('./services/telegram-user-session');
     config.sourceStatistics = { ...readAuthConfig({ ...env, OWNER_ID: ownerId }), channelId, sessionPath: getSessionPath(env) };

@@ -35,7 +35,7 @@ async function main() {
     await bot.dailySummary?.start();
     await bot.monthlySummary?.start();
     await bot.launch({
-      allowedUpdates: ['message', 'callback_query', 'chat_member', 'channel_post', 'edited_channel_post'],
+      allowedUpdates: ['message', 'edited_message', 'callback_query', 'chat_member', 'channel_post', 'edited_channel_post'],
     }, () => {
       console.log('Connected to Telegram. Starting the bot.');
     });

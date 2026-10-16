@@ -29,6 +29,14 @@ test('rejects IDs that would never match Telegram updates', () => {
   }
 });
 
+test('discussion group moderation is opt-in and requires its own numeric chat ID', () => {
+  assert.equal(loadConfig(validEnv).discussionGroupId, undefined);
+  assert.equal(loadConfig({ ...validEnv, DISCUSSION_GROUP_ID: ' -100789 ' }).discussionGroupId, '-100789');
+  for (const value of ['@group', '123', '-100456', '-9007199254740992']) {
+    assert.throws(() => loadConfig({ ...validEnv, DISCUSSION_GROUP_ID: value }), /DISCUSSION_GROUP_ID/);
+  }
+});
+
 test('source statistics require explicit enablement and validate credentials without exposing them', () => {
   assert.equal(loadConfig(validEnv).sourceStatistics, undefined);
   assert.throws(() => loadConfig({ ...validEnv, SOURCE_STATS_ENABLED: '1' }), /TELEGRAM_API_ID/);
