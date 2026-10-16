@@ -41,6 +41,24 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
   logger = console,
 } = {}) {
   const bot = new Telegraf(token);
+  bot.registerOwnerCommands = async () => {
+    const commands = [
+      { command: 'start', description: 'Открыть главное меню бота' },
+      { command: 'link', description: 'Создать ссылку для кампании' },
+      { command: 'promo', description: 'Создать URL-кампанию' },
+      { command: 'cancel', description: 'Отменить создание URL-кампании' },
+    ];
+    if (discussionGroupId) commands.push(
+      { command: 'spam_add', description: 'Добавить антиспам-фразу' },
+      { command: 'spam_remove', description: 'Удалить антиспам-фразу' },
+      { command: 'spam_list', description: 'Показать антиспам-фразы' },
+      { command: 'block', description: 'Запретить комментарии по ID' },
+      { command: 'unblock', description: 'Вернуть комментарии по ID' },
+      { command: 'block_list', description: 'Показать ограниченных пользователей' },
+    );
+    await bot.telegram.setMyCommands(commands, { scope: { type: 'chat', chat_id: Number(ownerId) } });
+    await bot.telegram.setChatMenuButton({ chatId: Number(ownerId), menuButton: { type: 'commands' } });
+  };
   const getSubscriberCount = () => bot.telegram.callApi('getChatMemberCount', { chat_id: channelId });
   const orderedUpdates = createOrderedChannelUpdatesMiddleware();
   const channelStatisticsReader = statisticsConfig && (statisticsReader || createTelegramStatisticsReader(statisticsConfig));

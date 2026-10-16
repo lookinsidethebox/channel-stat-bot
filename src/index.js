@@ -34,6 +34,11 @@ async function main() {
     await bot.reactionStatistics?.start();
     await bot.dailySummary?.start();
     await bot.monthlySummary?.start();
+    try {
+      await bot.registerOwnerCommands();
+    } catch (error) {
+      console.error('Не удалось обновить меню команд Telegram:', error.response?.description || error.message);
+    }
     await bot.launch({
       allowedUpdates: ['message', 'edited_message', 'callback_query', 'chat_member', 'channel_post', 'edited_channel_post'],
     }, () => {

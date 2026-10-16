@@ -1,3 +1,4 @@
+const { createHash } = require('node:crypto');
 const { normalize } = require('../storage/anti-spam.store');
 
 const NO_SEND = {
@@ -6,20 +7,49 @@ const NO_SEND = {
   can_send_voice_notes: false, can_send_polls: false, can_send_other_messages: false,
   can_add_web_page_previews: false,
 };
+const ALL_PERMISSIONS = Object.fromEntries([
+  ...Object.keys(NO_SEND), 'can_react_to_messages', 'can_edit_tag', 'can_change_info',
+  'can_invite_users', 'can_pin_messages', 'can_manage_topics',
+].map(key => [key, true]));
 
-function forwardedUser(message) {
-  if (message?.forward_origin?.type === 'user') return message.forward_origin.sender_user;
-  if (message?.forward_from) return message.forward_from;
-  return null;
+function profileFromMember(member, id) {
+  const user = member?.user;
+  if (user?.id !== id || typeof user.first_name !== 'string') return null;
+  const name = [user.first_name, user.last_name].filter(value => typeof value === 'string')
+    .join(' ').replace(/\s+/gu, ' ').trim();
+  if (!name) return null;
+  const profile = { name };
+  if (typeof user.username === 'string' && user.username) profile.username = user.username;
+  return profile;
+}
+
+function formatBlockedUser(id, profile) {
+  return `${profile?.name || 'Имя недоступно'}${profile?.username ? ` (@${profile.username})` : ''} – ${id}`;
+}
+
+function phraseKey(phrase) {
+  return createHash('sha256').update(normalize(phrase)).digest('hex').slice(0, 16);
 }
 
 function registerAntiSpamController(bot, { groupId, ownerId, store, logger = console }) {
-  let awaitingForward = false;
+  let awaitingSpamPhrase = false;
   const isOwnerPrivate = context => context.chat?.type === 'private' && String(context.from?.id) === String(ownerId);
+  async function saveSpamPhrase(context, phrase) {
+    try {
+      const added = await store.addPhrase(phrase);
+      awaitingSpamPhrase = false;
+      await context.reply(added ? `Фраза добавлена: ${phrase}` : 'Такая фраза уже есть.');
+    } catch (error) {
+      if (error.message === 'ANTI_SPAM_INVALID_PHRASE') {
+        await context.reply('Фраза должна содержать от 1 до 200 символов. Пришли другую фразу или отправь /cancel.');
+      } else throw error;
+    }
+  }
   async function restrict(telegram, id) {
-    await telegram.callApi('restrictChatMember', {
+    const result = await telegram.callApi('restrictChatMember', {
       chat_id: groupId, user_id: id, permissions: NO_SEND, use_independent_chat_permissions: true,
     });
+    if (result !== true) throw new Error('RESTRICT_CHAT_MEMBER_NOT_CONFIRMED');
   }
   async function inform(telegram, text) {
     try { await telegram.sendMessage(ownerId, text); }
@@ -33,11 +63,9 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
     if (!user || user.is_bot || String(user.id) === String(ownerId) || message.sender_chat || message.is_automatic_forward) return;
     try {
       const state = await store.read();
-      const name = user.username?.toLowerCase();
-      const blocked = state.blockedUsers.includes(user.id) || (name && state.blockedUsernames.includes(name));
+      const blocked = state.blockedUsers.includes(user.id);
       const content = normalize([message.text, message.caption].filter(Boolean).join(' '));
       const phrase = state.phrases.find(item => content.includes(normalize(item)));
-      if (name) await store.rememberUser(user);
       if (!blocked && !phrase) return;
       let restricted = true;
       if (phrase) {
@@ -51,132 +79,182 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
         try { await context.telegram.deleteMessage(groupId, message.message_id); }
         catch (error) { logger.error('Blocked comment deletion failed:', error); }
       }
-      if (name && blocked && !state.blockedUsers.includes(user.id)) await store.blockId(user.id);
-      await inform(context.telegram, `${phrase ? '🚫 Спам: пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}${name ? ` (@${name})` : ''}, ID ${user.id}.`);
+      await inform(context.telegram, `${phrase ? '🚫 Спам: пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}, ID ${user.id}.`);
     } catch (error) {
       logger.error('Anti-spam moderation failed:', error);
       await inform(context.telegram, `Не удалось обработать сообщение ${message.message_id} в группе комментариев. Проверь права бота и журнал.`);
     }
   });
 
+  bot.use(async (context, next) => {
+    if (!awaitingSpamPhrase || !isOwnerPrivate(context) || !context.message?.text?.startsWith('/')) return next();
+    if (/^\/cancel(?:@\w+)?(?:\s|$)/i.test(context.message.text)) {
+      awaitingSpamPhrase = false;
+      await context.reply('Добавление антиспам-фразы отменено.');
+      return;
+    }
+    awaitingSpamPhrase = false;
+    return next();
+  });
+
   bot.command('spam_add', async context => {
     if (!isOwnerPrivate(context)) return;
     const phrase = context.message.text.replace(/^\/spam_add(?:@\w+)?\s*/i, '').trim();
-    try {
-      const added = await store.addPhrase(phrase);
-      await context.reply(added ? `Фраза добавлена: ${phrase}` : 'Такая фраза уже есть.');
-    } catch (error) {
-      if (error.message === 'ANTI_SPAM_INVALID_PHRASE') await context.reply('Укажи фразу длиной от 1 до 200 символов: /spam_add фраза');
-      else throw error;
+    if (!phrase) {
+      awaitingSpamPhrase = true;
+      await context.reply('Какую антиспам-фразу добавить? Пришли её следующим сообщением. Для отмены отправь /cancel.');
+      return;
     }
+    await saveSpamPhrase(context, phrase);
   });
   bot.command('spam_remove', async context => {
     if (!isOwnerPrivate(context)) return;
     const phrase = context.message.text.replace(/^\/spam_remove(?:@\w+)?\s*/i, '').trim();
-    await context.reply(await store.removePhrase(phrase) ? 'Фраза удалена.' : 'Такой фразы нет.');
+    if (phrase) {
+      await context.reply(await store.removePhrase(phrase) ? 'Фраза удалена.' : 'Такой фразы нет.');
+      return;
+    }
+    const { phrases } = await store.read();
+    if (!phrases.length) {
+      await context.reply('Антиспам-фраз пока нет.');
+      return;
+    }
+    for (let start = 0; start < phrases.length; start += 30) {
+      await context.reply('Выбери фразу для удаления:', { reply_markup: { inline_keyboard:
+        phrases.slice(start, start + 30).map(item => [{
+          text: [...item].slice(0, 50).join(''), callback_data: `spam_remove:${phraseKey(item)}`,
+        }]),
+      } });
+    }
+  });
+  bot.action(/^spam_remove:([a-f0-9]{16})$/, async context => {
+    if (!isOwnerPrivate(context)) return;
+    const { phrases } = await store.read();
+    const phrase = phrases.find(item => phraseKey(item) === context.match[1]);
+    if (!phrase) {
+      await context.answerCbQuery('Фраза уже удалена.');
+      return;
+    }
+    const removed = await store.removePhrase(phrase);
+    await context.answerCbQuery(removed ? 'Фраза удалена.' : 'Фраза уже удалена.');
+    if (removed) await context.reply(`Фраза удалена: ${phrase}`);
   });
   bot.command('spam_list', async context => {
     if (!isOwnerPrivate(context)) return;
     const { phrases } = await store.read();
-    await context.reply(phrases.length ? `Антиспам-фразы:\n${phrases.map((item, index) => `${index + 1}. ${item}`).join('\n')}` : 'Антиспам-фраз пока нет.');
-  });
-  bot.command('comment_block', async context => {
-    if (!isOwnerPrivate(context)) return;
-    const argument = context.message.text.replace(/^\/comment_block(?:@\w+)?\s*/i, '').trim();
-    const forwarded = forwardedUser(context.message.reply_to_message);
-    const id = forwarded?.id || (/^[1-9]\d*$/.test(argument) ? Number(argument) : null);
-    try {
-      if (id && Number.isSafeInteger(id) && String(id) !== String(ownerId)) {
-        await store.blockId(id);
-        awaitingForward = false;
-        try {
-          await restrict(context.telegram, id);
-          await context.reply(`Пользователь ID ${id} больше не может отправлять комментарии.`);
-        } catch (error) {
-          logger.error('Immediate comment restriction failed:', error);
-          await context.reply(`ID ${id} сохранён. Telegram пока не применил ограничение; бот удалит первое сообщение пользователя и повторит запрет. Проверь права бота в группе.`);
-        }
-      } else if (/^@[a-zA-Z0-9_]{5,32}$/.test(argument)) {
-        const knownId = await store.blockUsername(argument);
-        let restricted = false;
-        if (knownId) {
-          try {
-            const member = await context.telegram.callApi('getChatMember', { chat_id: groupId, user_id: knownId });
-            if (member.user?.username?.toLowerCase() === argument.slice(1).toLowerCase()) {
-              await restrict(context.telegram, knownId);
-              await store.blockId(knownId);
-              restricted = true;
-            }
-          } catch (error) { logger.error('Username lookup/restriction failed:', error); }
-        }
-        awaitingForward = false;
-        await context.reply(restricted
-          ? `Комментарии для ${argument} запрещены (ID ${knownId}).`
-          : `Имя ${argument} сохранено. Telegram не дал подтвердить ID сейчас; бот запретит комментарии при первом сообщении этого пользователя в группе. Для немедленного запрета перешли его сообщение боту.`);
-      } else if (!argument) {
-        awaitingForward = true;
-        await context.reply('Перешли сообщение пользователя следующим сообщением или ответь командой /comment_block на уже пересланное сообщение.');
-      } else {
-        await context.reply('Используй /comment_block @username, /comment_block ID или перешли сообщение после /comment_block.');
-      }
-    } catch (error) {
-      logger.error('Comment restriction failed:', error);
-      await context.reply('Не удалось запретить комментарии. Проверь ID пользователя и право бота ограничивать участников группы.');
-    }
-  });
-  bot.command('comment_unblock', async context => {
-    if (!isOwnerPrivate(context)) return;
-    const value = context.message.text.replace(/^\/comment_unblock(?:@\w+)?\s*/i, '').trim();
-    if (!/^(@[a-zA-Z0-9_]{5,32}|[1-9]\d*)$/.test(value)) {
-      await context.reply('Используй /comment_unblock @username или /comment_unblock ID.');
+    if (!phrases.length) {
+      await context.reply('Антиспам-фраз пока нет.');
       return;
     }
+    let part = 'Антиспам-фразы:';
+    for (const [index, phrase] of phrases.entries()) {
+      const line = `${index + 1}. ${phrase}`;
+      if (part.length + line.length + 1 > 3900) {
+        await context.reply(part);
+        part = line;
+      } else part += `\n${line}`;
+    }
+    await context.reply(part);
+  });
+  bot.command('block', async context => {
+    if (!isOwnerPrivate(context)) return;
+    const argument = context.message.text.replace(/^\/block(?:@\w+)?\s*/i, '').trim();
+    const id = Number(argument);
+    if (!/^[1-9]\d*$/.test(argument) || !Number.isSafeInteger(id) || String(id) === String(ownerId)) {
+      await context.reply('Укажи числовой ID пользователя: /block 8074667319');
+      return;
+    }
+    try {
+      await restrict(context.telegram, id);
+    } catch (error) {
+      logger.error('Immediate comment restriction failed:', error);
+      await context.reply(`Не удалось запретить комментарии для ID ${id}. ID не добавлен в список. Проверь права бота и статус пользователя в группе.`);
+      return;
+    }
+    let profile = null;
+    try {
+      profile = profileFromMember(await context.telegram.callApi('getChatMember', {
+        chat_id: groupId, user_id: id,
+      }), id);
+    } catch (error) {
+      logger.error('Blocked user profile lookup failed:', error);
+    }
+    try {
+      await store.blockId(id, profile || undefined);
+    } catch (error) {
+      logger.error('Restricted user persistence failed:', error);
+      await context.reply(`Telegram запретил писать пользователю ID ${id}, но не удалось сохранить ID в списке бота. Проверь хранилище.`);
+      return;
+    }
+    await context.reply(`Пользователь ID ${id} больше не может писать в группе комментариев.`);
+  });
+  bot.command('block_list', async context => {
+    if (!isOwnerPrivate(context)) return;
     const state = await store.read();
-    const id = value.startsWith('@') ? state.knownUsers[value.slice(1).toLowerCase()] : Number(value);
-    const name = value.startsWith('@') ? value.slice(1).toLowerCase() : null;
-    const wasBlocked = (name && state.blockedUsernames.includes(name)) || state.blockedUsers.includes(id);
-    if (!wasBlocked) {
-      await context.reply('Такого запрета нет.');
+    if (!state.blockedUsers.length) {
+      await context.reply('Список ограниченных пользователей пуст.');
       return;
     }
-    let telegramFailed = false;
-    if (id && state.blockedUsers.includes(id)) {
+    const lines = [];
+    for (const id of state.blockedUsers) {
+      let profile = state.profiles[String(id)];
       try {
-        await context.telegram.callApi('restrictChatMember', {
-          chat_id: groupId, user_id: id, permissions: Object.fromEntries(Object.keys(NO_SEND).map(key => [key, true])),
-          use_independent_chat_permissions: true,
-        });
-      } catch (error) { telegramFailed = true; logger.error('Comment unrestriction failed:', error); }
-    }
-    await store.unblock(value);
-    await context.reply(telegramFailed
-      ? `Правило для ${value} удалено, но Telegram не снял ограничение. Проверь права бота и статус пользователя в группе.`
-      : `Запрет комментариев для ${value} снят.`);
-  });
-  bot.on('message', async (context, next) => {
-    if (!isOwnerPrivate(context)) return next();
-    const forwarded = Boolean(context.message.forward_origin || context.message.forward_from || context.message.forward_sender_name);
-    if (!forwarded && !awaitingForward) return next();
-    if (!forwarded && context.message.text?.startsWith('/')) return next();
-    const user = forwardedUser(context.message);
-    if (!user?.id || String(user.id) === String(ownerId)) {
-      await context.reply('В пересланном сообщении Telegram скрыл отправителя. Нужен ID или сообщение с доступным автором.');
-      return;
-    }
-    awaitingForward = false;
-    try {
-      await store.blockId(user.id);
-      try {
-        await restrict(context.telegram, user.id);
-        await context.reply(`Пользователь ID ${user.id} больше не может отправлять комментарии.`);
+        const current = profileFromMember(await context.telegram.callApi('getChatMember', {
+          chat_id: groupId, user_id: id,
+        }), id);
+        if (current) {
+          if (JSON.stringify(current) !== JSON.stringify(profile)) await store.saveProfile(id, current);
+          profile = current;
+        }
       } catch (error) {
-        logger.error('Immediate forwarded restriction failed:', error);
-        await context.reply(`ID ${user.id} сохранён. Telegram пока не применил ограничение; бот удалит первое сообщение пользователя и повторит запрет. Проверь права бота в группе.`);
+        logger.error('Blocked user profile lookup failed:', error);
       }
-    } catch (error) {
-      logger.error('Forwarded comment restriction failed:', error);
-      await context.reply('Не удалось запретить комментарии. Проверь права бота в группе.');
+      lines.push(formatBlockedUser(id, profile));
     }
+    let part = 'Запрещено писать в группе:';
+    for (const line of lines) {
+      if (part.length + line.length + 1 > 3900) {
+        await context.reply(part);
+        part = line;
+      } else part += `\n${line}`;
+    }
+    await context.reply(part);
+  });
+  bot.command('unblock', async context => {
+    if (!isOwnerPrivate(context)) return;
+    const argument = context.message.text.replace(/^\/unblock(?:@\w+)?\s*/i, '').trim();
+    const id = Number(argument);
+    if (!/^[1-9]\d*$/.test(argument) || !Number.isSafeInteger(id)) {
+      await context.reply('Укажи числовой ID пользователя: /unblock 8074667319');
+      return;
+    }
+    if (!(await store.read()).blockedUsers.includes(id)) {
+      await context.reply(`ID ${id} нет в списке ограниченных пользователей.`);
+      return;
+    }
+    try {
+      const result = await context.telegram.callApi('restrictChatMember', {
+        chat_id: groupId, user_id: id, permissions: ALL_PERMISSIONS,
+        use_independent_chat_permissions: true,
+      });
+      if (result !== true) throw new Error('UNRESTRICT_CHAT_MEMBER_NOT_CONFIRMED');
+    } catch (error) {
+      logger.error('Comment unrestriction failed:', error);
+      await context.reply(`Не удалось вернуть возможность писать пользователю ID ${id}. Он остаётся в списке.`);
+      return;
+    }
+    try {
+      await store.unblockId(id);
+    } catch (error) {
+      logger.error('Unrestricted user persistence failed:', error);
+      await context.reply(`Telegram разрешил писать пользователю ID ${id}, но не удалось удалить ID из списка бота. Проверь хранилище.`);
+      return;
+    }
+    await context.reply(`Пользователь ID ${id} снова может писать в группе комментариев.`);
+  });
+  bot.on('text', async (context, next) => {
+    if (!awaitingSpamPhrase || !isOwnerPrivate(context)) return next();
+    await saveSpamPhrase(context, context.message.text.trim());
   });
 }
 
