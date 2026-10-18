@@ -115,7 +115,7 @@ test('join format includes campaigns for Ads and URL only', () => {
   const member = { name: 'Анна Иванова', username: 'anna', source: { type: 'ads' }, adsCampaign: { title: 'Новая кампания' } };
   assert.equal(formatJoinNotification(member), `${headline}\nИмя: Анна Иванова (@anna)\nИсточник: Ads (Новая кампания)`);
   for (const [type, label] of Object.entries({ url: 'URL', search: 'Search', pm: 'PM',
-    chat_folder: 'Shareable Chat Folders', invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'Неизвестно' })) {
+    chat_folder: 'Shareable Chat Folders', invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'undefined', undefined: 'undefined' })) {
     assert.equal(formatJoinNotification({ ...member, username: null, source: { type },
       ...(type === 'url' ? { urlCampaign: { title: 'Новая кампания' } } : {}) }),
       `${headline}\nИмя: Анна Иванова\nИсточник: ${label}${type === 'url' ? ' (Новая кампания)' : ''}`);
@@ -189,7 +189,7 @@ test('campaign already known to Ads statistics is reported after its source is i
   assert.equal(h.messages.length, 2);
 });
 
-test('unknown source prompts only after 30 minutes and a later source still updates', async t => {
+test('undefined source is reported without a manual prompt after 30 minutes and a later source still updates', async t => {
   const h = await harness(t);
   await h.bot.handleUpdate(joinUpdate());
   h.setNotificationTime(Date.parse(at(1)) + 29 * 60000 + 59000);
@@ -198,7 +198,8 @@ test('unknown source prompts only after 30 minutes and a later source still upda
   h.setNotificationTime(Date.parse(at(1)) + 30 * 60000);
   await h.bot.memberNotifications.sendPending();
   assert.equal(h.messages.length, 2);
-  assert.match(h.messages[1][1], /Источник не удалось определить/);
+  assert.equal(h.messages[1][1], sourceUpdate('undefined'));
+  assert.equal((await h.memberStore.getMember(345, at(1))).source.type, 'undefined');
   assert.equal((await h.memberStore.getMember(345, at(1))).sourceNotification.status, 'unknown_sent');
   h.setCounts({ url: 1 });
   await h.bot.sourceStatistics.checkPending();

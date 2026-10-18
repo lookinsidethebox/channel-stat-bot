@@ -12,7 +12,7 @@ function monthWindow(now, offset = 0) {
 }
 
 const labels = { ...Object.fromEntries(Object.entries(SOURCE_NAMES).map(([name, type]) => [type, name])),
-  invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'Неизвестно' };
+  invite_link: 'Пригласительная ссылка', join_request: 'Заявка на вступление', unknown: 'undefined', undefined: 'undefined' };
 const categories = [
   ['views', 'просмотров'], ['reactions', 'реакций'], ['forwards', 'репостов'], ['comments', 'комментариев'],
 ];

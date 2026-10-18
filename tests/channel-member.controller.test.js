@@ -110,7 +110,7 @@ test('records folder, join-request, and unknown sources distinctly', async (suit
     {
       name: 'unattributed join',
       update: {},
-      expected: { type: 'unknown', name: null },
+      expected: { type: 'undefined', name: null },
     },
   ];
 

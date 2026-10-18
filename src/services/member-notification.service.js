@@ -4,6 +4,8 @@ const sourceLabels = {
   ...Object.fromEntries(Object.entries(SOURCE_NAMES).map(([name, type]) => [type, name])),
   invite_link: 'Пригласительная ссылка',
   join_request: 'Заявка на вступление',
+  undefined: 'undefined',
+  unknown: 'undefined',
 };
 
 const dateTimeFormat = new Intl.DateTimeFormat('ru-RU', {
@@ -91,9 +93,8 @@ function formatImmediateJoinNotification(member, history, chat) {
     `🎉 На канале пользователь-возвращенец – ${formatMemberName(member)}`);
 }
 
-function formatSourceNotification(member, unknown = false) {
-  const message = `Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: ${formatMemberSource(member)}`;
-  return unknown ? `${message}\nИсточник не удалось определить. Ответь на это сообщение: URL, Ads, Search, PM или Chat Folder.` : message;
+function formatSourceNotification(member) {
+  return `Обновилась информация о том, откуда пришел пользователь ${formatMemberName(member)}: ${formatMemberSource(member)}`;
 }
 
 function splitNotification(text) {
@@ -168,7 +169,7 @@ function createMemberNotifier({ memberStore, sendMessage, channelId, logger = co
       }
       for (const member of await memberStore.getPendingSourceNotifications()) {
         if (member.joinNotification?.status !== 'sent') continue;
-        const unknown = member.source?.type === 'unknown';
+        const unknown = ['unknown', 'undefined'].includes(member.source?.type);
         if (unknown && (member.sourceNotification.status === 'unknown_sent'
           || now() - Date.parse(member.addedAt) < attributionTimeoutMs)) continue;
         if (member.source?.type === 'ads' && !member.adsCampaign?.title) continue;
@@ -178,7 +179,7 @@ function createMemberNotifier({ memberStore, sendMessage, channelId, logger = co
           const acknowledged = deliveredSources.get(key);
           let messageId = acknowledged?.status === status ? acknowledged.messageId : null;
           if (acknowledged?.status !== status) {
-            const sent = await sendMessage(formatSourceNotification(member, unknown));
+            const sent = await sendMessage(formatSourceNotification(member));
             messageId = sent?.message_id ?? null;
             deliveredSources.set(key, { status, messageId });
           }

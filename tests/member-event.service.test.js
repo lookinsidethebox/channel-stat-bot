@@ -29,7 +29,7 @@ test('normalizes a membership event and identifies the changed user rather than 
     channelId: '-100456',
     action: 'joined',
     user: { id: 123, name: 'Test User', username: null },
-    source: { type: 'unknown', name: null },
+    source: { type: 'undefined', name: null },
   });
 });
 

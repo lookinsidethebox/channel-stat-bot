@@ -41,8 +41,8 @@ function applySnapshot(state, snapshot, members) {
     if (state.decisions[membershipKey(member.userId, member.addedAt)]) continue;
     if (member.addedAt <= state.initializedAt) decide(member, 'unresolved', 'no_prior_snapshot');
     else if (member.source?.type === 'ads') pending.push(member);
-    else if (member.source?.type === 'unknown' && member.sourceLookup?.status === 'pending') pending.push(member);
-    else decide(member, member.source?.type === 'unknown' ? 'unresolved' : 'not_applicable', 'source_is_not_ads');
+    else if (['unknown', 'undefined'].includes(member.source?.type) && member.sourceLookup?.status === 'pending') pending.push(member);
+    else decide(member, ['unknown', 'undefined'].includes(member.source?.type) ? 'unresolved' : 'not_applicable', 'source_is_not_ads');
   }
   const ids = Object.keys(snapshot.ads);
   // A newly created ad has an implicit zero baseline. Its first reported join

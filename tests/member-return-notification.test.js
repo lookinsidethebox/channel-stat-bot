@@ -48,7 +48,7 @@ test('incomplete history keeps known departures and marks missing data explicitl
   const message = formatJoinNotification({ ...returned, username: null }, [orphan], channel);
   assert.ok(message.includes('Имя: Анна Иванова\n'));
   assert.ok(message.endsWith([
-    'Добавился: нет данных', 'Источник: Неизвестно', 'Пришел из-за поста: нет данных',
+    'Добавился: нет данных', 'Источник: undefined', 'Пришел из-за поста: нет данных',
     'Удалился: 02.01.2026 09:00', 'Удалился из-за поста: Пост без текста https://t.me/c/1234567890/1',
     'Сколько дней провел на канале: нет данных',
   ].join('\n')));

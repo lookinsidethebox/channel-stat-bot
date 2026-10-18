@@ -207,7 +207,7 @@ function createMemberStore(filePath = defaultFilePath) {
     const urlCampaigns = new Map();
     const adsCampaigns = new Map();
     for (const member of arrivals) {
-      const source = member.source?.type || 'unknown';
+      const source = member.source?.type === 'unknown' ? 'undefined' : member.source?.type || 'undefined';
       sources[source] = (sources[source] || 0) + 1;
       const campaigns = source === 'url' ? urlCampaigns : source === 'ads' ? adsCampaigns : null;
       const campaign = source === 'url' ? member.urlCampaign : member.adsCampaign;
@@ -231,7 +231,7 @@ function createMemberStore(filePath = defaultFilePath) {
         && entry.addedAt === decision.addedAt);
       if (!member || member.sourceLookup?.status !== 'pending') return false;
       // Direct Telegram metadata and owner corrections always take precedence.
-      if (decision.source && member.source?.type === 'unknown') member.source = decision.source;
+      if (decision.source && ['unknown', 'undefined'].includes(member.source?.type)) member.source = decision.source;
       member.sourceLookup = {
         status: decision.status, day: decision.day, checkedAt: decision.checkedAt,
         ...(decision.source ? { statisticsSource: decision.source.type } : { reason: decision.reason }),
@@ -251,7 +251,7 @@ function createMemberStore(filePath = defaultFilePath) {
     return updateMemberData(data => {
       const member = data.members.findLast(entry => entry.joinNotification?.status === 'sent'
         && (entry.joinNotification.messageIds?.includes(messageId) || entry.sourceNotification?.messageId === messageId));
-      if (!member || member.source?.type !== 'unknown') return false;
+      if (!member || !['unknown', 'undefined'].includes(member.source?.type)) return false;
       member.source = { type, name: null, attribution: 'manual', confirmedBy: 'owner' };
       member.sourceLookup = { status: 'manual', checkedAt: new Date().toISOString() };
       if (type === 'ads' && adsEnabled) member.adsCampaign = { status: 'pending' };

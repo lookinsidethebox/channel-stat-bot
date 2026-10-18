@@ -19,7 +19,7 @@ function getMemberSource(update) {
     return { type: 'invite_link', name: update.invite_link.name || null };
   }
 
-  return { type: 'unknown', name: null };
+  return { type: 'undefined', name: null };
 }
 
 function createMemberEvent(update) {
