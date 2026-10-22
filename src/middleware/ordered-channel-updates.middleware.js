@@ -1,8 +1,10 @@
-function createOrderedChannelUpdatesMiddleware() {
+function createOrderedChannelUpdatesMiddleware(discussionGroupId) {
   let queue = Promise.resolve();
 
   const middleware = (context, next) => {
-    if (!context.chatMember && !context.channelPost && !context.editedChannelPost) {
+    const message = context.message || context.editedMessage;
+    if (!context.chatMember && !context.channelPost && !context.editedChannelPost
+      && (!message || !discussionGroupId || String(message.chat?.id) !== String(discussionGroupId))) {
       return next();
     }
 

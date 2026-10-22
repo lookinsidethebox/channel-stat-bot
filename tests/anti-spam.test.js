@@ -251,12 +251,16 @@ test('version 1 data preserves phrases and ID blocks but discards username rules
   await writeFile(file, JSON.stringify({ version: 1, phrases: ['spam'], blockedUsers: [777],
     blockedUsernames: ['nitin7854'], knownUsers: { nitin7854: 888 } }));
   const store = createAntiSpamStore(file);
-  assert.deepEqual(await store.read(), { version: 4, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], profiles: {} });
+  assert.deepEqual(await store.read(), { version: 5, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], nonSubscriberBans: [], profiles: {} });
   await store.blockId(999);
   const saved = JSON.parse(require('node:fs').readFileSync(file, 'utf8'));
-  assert.deepEqual(saved, { version: 4, phrases: ['spam'], blockedUsers: [777, 999], pendingUsers: [], bannedUsers: [], profiles: {} });
+  assert.deepEqual(saved, { version: 5, phrases: ['spam'], blockedUsers: [777, 999], pendingUsers: [], bannedUsers: [], nonSubscriberBans: [], profiles: {} });
   await writeFile(file, JSON.stringify({ version: 2, phrases: ['spam'], blockedUsers: [777] }));
-  assert.deepEqual(await store.read(), { version: 4, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], profiles: {} });
+  assert.deepEqual(await store.read(), { version: 5, phrases: ['spam'], blockedUsers: [777], pendingUsers: [], bannedUsers: [], nonSubscriberBans: [], profiles: {} });
+  await writeFile(file, JSON.stringify({ version: 4, phrases: ['spam'], blockedUsers: [777],
+    pendingUsers: [888], bannedUsers: [999], profiles: { 999: { name: 'Banned' } } }));
+  assert.deepEqual(await store.read(), { version: 5, phrases: ['spam'], blockedUsers: [777],
+    pendingUsers: [888], bannedUsers: [999], nonSubscriberBans: [], profiles: { 999: { name: 'Banned' } } });
 });
 
 test('/block_list shows names, optional usernames, and IDs from Telegram', async t => {
@@ -351,4 +355,87 @@ test('moderates edited captions only in the configured discussion group', async 
     caption: 'ЗАПУСТИТЬ БОТА',
   } });
   assert.ok(calls.some(call => call[1] === 'banChatMember' && call[2].user_id === 555));
+});
+
+test('deletes a non-subscriber comment, bans its author, and grants amnesty on channel join', async t => {
+  const { bot, store, calls } = await harness(t);
+  bot.context.telegram.callApi = async (method, payload) => {
+    calls.push(['api', method, payload]);
+    if (method === 'getChatMember') return { status: 'left' };
+    return true;
+  };
+  await bot.handleUpdate(message(user, group, 'обычный комментарий'));
+  assert.ok(calls.some(call => call[1] === 'getChatMember' && call[2].chat_id === '-100456'));
+  assert.ok(calls.some(call => call[0] === 'delete' && call[2] === 7));
+  assert.ok(calls.some(call => call[1] === 'banChatMember' && call[2].chat_id === '-100789'));
+  assert.deepEqual((await store.read()).nonSubscriberBans, [555]);
+  await bot.handleUpdate(message(owner, privateChat, '/block_list'));
+  assert.match(calls.at(-1)[2], /Nitin \(@Nitin\) – 555 \(не подписан\)/);
+
+  await bot.handleUpdate({ update_id: 1000001, chat_member: {
+    chat: { id: -100456, type: 'channel' }, from: owner, date: 1780000000,
+    old_chat_member: { user, status: 'left' }, new_chat_member: { user, status: 'member' },
+  } });
+  assert.ok(calls.some(call => call[1] === 'unbanChatMember' && call[2].only_if_banned === true));
+  assert.deepEqual((await store.read()).nonSubscriberBans, []);
+});
+
+test('a phrase ban stays in place when its author subscribes', async t => {
+  const { bot, store, calls } = await harness(t);
+  await store.addPhrase('запрещённая фраза');
+  await bot.handleUpdate(message(user, group, 'запрещённая фраза'));
+  assert.deepEqual((await store.read()).bannedUsers, [555]);
+  await bot.handleUpdate({ update_id: 1000004, chat_member: {
+    chat: { id: -100456, type: 'channel' }, from: owner, date: 1780000000,
+    old_chat_member: { user, status: 'left' }, new_chat_member: { user, status: 'member' },
+  } });
+  assert.deepEqual((await store.read()).bannedUsers, [555]);
+  assert.equal(calls.filter(call => call[1] === 'unbanChatMember').length, 0);
+});
+
+test('the owner can make an automatic ban permanent or lift it manually', async t => {
+  const { bot, store, calls } = await harness(t);
+  await store.banNonSubscriber(555);
+  await bot.handleUpdate(message(owner, privateChat, '/block 555'));
+  assert.deepEqual((await store.read()).bannedUsers, [555]);
+  assert.deepEqual((await store.read()).nonSubscriberBans, []);
+  await bot.handleUpdate(message(owner, privateChat, '/unblock 555'));
+  assert.ok(calls.some(call => call[1] === 'unbanChatMember' && call[2].user_id === 555));
+  assert.deepEqual((await store.read()).bannedUsers, []);
+  await store.banNonSubscriber(555);
+  await bot.handleUpdate(message(owner, privateChat, '/unblock 555'));
+  assert.deepEqual((await store.read()).nonSubscriberBans, []);
+});
+
+test('keeps subscriber comments and leaves unknown membership untouched', async t => {
+  const { bot, store, calls } = await harness(t);
+  bot.context.telegram.callApi = async (method) => {
+    if (method === 'getChatMember') return { status: 'restricted', is_member: true };
+    return true;
+  };
+  await bot.handleUpdate(message(user, group, 'обычный комментарий'));
+  bot.context.telegram.callApi = async () => { throw new Error('membership unavailable'); };
+  await bot.handleUpdate(message(user, group, 'ещё комментарий'));
+  assert.equal(calls.filter(call => call[0] === 'delete').length, 0);
+  assert.deepEqual((await store.read()).nonSubscriberBans, []);
+});
+
+test('failed amnesty retains the automatic ban for the next join update', async t => {
+  const { bot, store, calls } = await harness(t);
+  await store.banNonSubscriber(555);
+  bot.context.telegram.callApi = async (method, payload) => {
+    calls.push(['api', method, payload]);
+    if (method === 'unbanChatMember') return false;
+    return true;
+  };
+  const join = { chat: { id: -100456, type: 'channel' }, from: owner, date: 1780000000,
+    old_chat_member: { user, status: 'left' }, new_chat_member: { user, status: 'member' } };
+  await bot.handleUpdate({ update_id: 1000002, chat_member: join });
+  assert.deepEqual((await store.read()).nonSubscriberBans, [555]);
+  bot.context.telegram.callApi = async (method, payload) => {
+    calls.push(['api', method, payload]);
+    return true;
+  };
+  await bot.handleUpdate({ update_id: 1000003, chat_member: join });
+  assert.deepEqual((await store.read()).nonSubscriberBans, []);
 });

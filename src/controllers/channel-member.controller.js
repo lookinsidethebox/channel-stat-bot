@@ -3,7 +3,7 @@ const { fetchChannelPostAt } = require('../services/channel-post.service');
 const { formatLeaveNotification } = require('../services/member-notification.service');
 
 function registerChannelMemberController(bot, {
-  channelId, ownerId, recordMemberEvent, getMemberAtRemoval, notifyJoins, fetchPost = fetchChannelPostAt, sourceStatistics, adsStatistics, logger = console,
+  channelId, ownerId, recordMemberEvent, getMemberAtRemoval, notifyJoins, forgiveCommentBan, fetchPost = fetchChannelPostAt, sourceStatistics, adsStatistics, logger = console,
 }) {
   bot.on('chat_member', async (context) => {
     const update = context.chatMember;
@@ -15,6 +15,10 @@ function registerChannelMemberController(bot, {
     const event = createMemberEvent(update);
     if (!event) {
       return;
+    }
+    if (event.action === 'joined' && forgiveCommentBan) {
+      try { await forgiveCommentBan(context.telegram, event.user.id); }
+      catch (error) { logger.error('Comment ban amnesty failed:', error); }
     }
 
     let post = null;

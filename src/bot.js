@@ -57,7 +57,7 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
     await bot.telegram.setChatMenuButton({ chatId: Number(ownerId), menuButton: { type: 'commands' } });
   };
   const getSubscriberCount = () => bot.telegram.callApi('getChatMemberCount', { chat_id: channelId });
-  const orderedUpdates = createOrderedChannelUpdatesMiddleware();
+  const orderedUpdates = createOrderedChannelUpdatesMiddleware(discussionGroupId);
   const channelStatisticsReader = statisticsConfig && (statisticsReader || createTelegramStatisticsReader(statisticsConfig));
   const notifications = createMemberNotifier({
     memberStore, channelId, logger,
@@ -114,20 +114,21 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
     bot.use(createDebugMemberUpdatesMiddleware({ channelId, logger }));
   }
   // Channel updates must be handled before filtering messages by their sender.
+  const antiSpam = discussionGroupId && registerAntiSpamController(bot, {
+    groupId: discussionGroupId, channelId, ownerId, store: antiSpamStore || createAntiSpamStore(), logger,
+  });
   registerChannelMemberController(bot, {
     channelId,
     ownerId,
     recordMemberEvent: memberStore.recordMemberEvent,
     getMemberAtRemoval: memberStore.getMemberAtRemoval,
     notifyJoins: sendPendingJoins,
+    forgiveCommentBan: antiSpam?.forgiveOnJoin,
     sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics,
     logger,
   });
   registerChannelPostController(bot, { channelId, savePost: memberStore.saveLatestPost });
-  if (discussionGroupId) registerAntiSpamController(bot, {
-    groupId: discussionGroupId, ownerId, store: antiSpamStore || createAntiSpamStore(), logger,
-  });
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, notifyJoins: sendPendingJoins, logger });

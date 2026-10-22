@@ -31,7 +31,7 @@ function phraseKey(phrase) {
   return createHash('sha256').update(normalize(phrase)).digest('hex').slice(0, 16);
 }
 
-function registerAntiSpamController(bot, { groupId, ownerId, store, logger = console }) {
+function registerAntiSpamController(bot, { groupId, channelId, ownerId, store, logger = console }) {
   let awaitingSpamPhrase = false;
   const isOwnerPrivate = context => context.chat?.type === 'private' && String(context.from?.id) === String(ownerId);
   async function saveSpamPhrase(context, phrase) {
@@ -55,6 +55,17 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
     try { await telegram.sendMessage(ownerId, text); }
     catch (error) { logger.error('Anti-spam owner notification failed:', error); }
   }
+  async function forgiveOnJoin(telegram, userId) {
+    const state = await store.read();
+    if (!state.nonSubscriberBans.includes(userId)) return;
+    if (state.blockedUsers.includes(userId) || state.pendingUsers.includes(userId)
+      || state.bannedUsers.includes(userId)) return;
+    const result = await telegram.callApi('unbanChatMember', {
+      chat_id: groupId, user_id: userId, only_if_banned: true,
+    });
+    if (result !== true) throw new Error('UNBAN_CHAT_MEMBER_NOT_CONFIRMED');
+    await store.forgiveSubscriber(userId);
+  }
 
   bot.on(['message', 'edited_message'], async (context, next) => {
     const message = context.msg;
@@ -66,25 +77,41 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       const blocked = state.blockedUsers.includes(user.id);
       const pending = state.pendingUsers.includes(user.id);
       const banned = state.bannedUsers.includes(user.id);
+      const nonSubscriberBan = state.nonSubscriberBans.includes(user.id);
       const content = normalize([message.text, message.caption].filter(Boolean).join(' '));
       const phrase = state.phrases.find(item => content.includes(normalize(item)));
-      if (!blocked && !pending && !banned && !phrase) return;
+      let nonSubscriber = false;
+      if (!blocked && !pending && !banned && !phrase) {
+        const member = await context.telegram.callApi('getChatMember', {
+          chat_id: channelId, user_id: user.id,
+        });
+        const subscribed = ['creator', 'administrator', 'member'].includes(member.status)
+          || (member.status === 'restricted' && member.is_member === true);
+        if (subscribed) {
+          if (nonSubscriberBan) await forgiveOnJoin(context.telegram, user.id);
+          return;
+        }
+        nonSubscriber = member.status === 'left' || member.status === 'kicked'
+          || (member.status === 'restricted' && member.is_member === false);
+        if (!nonSubscriber) throw new Error(`UNKNOWN_CHANNEL_MEMBER_STATUS: ${member.status}`);
+      }
       let restricted = true;
-      if (phrase || pending || banned) {
+      if (phrase || pending || banned || nonSubscriber) {
         if (pending) await store.saveProfile(user.id, profileFromMember({ user }, user.id));
         // Ban even if Combot or the author deleted the message first.
         try { await context.telegram.deleteMessage(groupId, message.message_id); }
         catch (error) { logger.error('Anti-spam deletion failed:', error); }
         const result = await context.telegram.callApi('banChatMember', { chat_id: groupId, user_id: user.id });
         if (result !== true) throw new Error('BAN_CHAT_MEMBER_NOT_CONFIRMED');
-        if (pending) await store.banId(user.id, profileFromMember({ user }, user.id) || undefined);
+        if (pending || phrase) await store.banId(user.id, profileFromMember({ user }, user.id) || undefined);
+        else if (nonSubscriber && !phrase && !banned) await store.banNonSubscriber(user.id, profileFromMember({ user }, user.id) || undefined);
       } else {
         try { await restrict(context.telegram, user.id); }
         catch (error) { restricted = false; logger.error('Blocked user restriction failed:', error); }
         try { await context.telegram.deleteMessage(groupId, message.message_id); }
         catch (error) { logger.error('Blocked comment deletion failed:', error); }
       }
-      await inform(context.telegram, `${phrase || pending || banned ? '🚫 Пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}, ID ${user.id}.`);
+      await inform(context.telegram, `${phrase || pending || banned || nonSubscriber ? '🚫 Пользователь забанен' : restricted ? '🔇 Комментарии запрещены' : '⚠️ Не удалось ограничить комментарии'}: ${user.first_name || 'Пользователь'}, ID ${user.id}${nonSubscriber ? ' (не подписан на канал)' : ''}.`);
     } catch (error) {
       logger.error('Anti-spam moderation failed:', error);
       await inform(context.telegram, `Не удалось обработать сообщение ${message.message_id} в группе комментариев. Проверь права бота и журнал.`);
@@ -170,6 +197,11 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       return;
     }
     const existing = await store.read();
+    if (existing.nonSubscriberBans.includes(id)) {
+      await store.banId(id);
+      await context.reply(`ID ${id} переведён из автоматического бана в постоянный.`);
+      return;
+    }
     if (existing.pendingUsers.includes(id) || existing.bannedUsers.includes(id)) {
       await context.reply(`ID ${id} уже есть в списке запрета.`);
       return;
@@ -206,7 +238,7 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
   bot.command('block_list', async context => {
     if (!isOwnerPrivate(context)) return;
     const state = await store.read();
-    const ids = [...new Set([...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers])];
+    const ids = [...new Set([...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers, ...state.nonSubscriberBans])];
     if (!ids.length) {
       await context.reply('Список ограниченных пользователей пуст.');
       return;
@@ -226,7 +258,8 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
         logger.error('Blocked user profile lookup failed:', error);
       }
       const status = state.pendingUsers.includes(id) ? ' (ожидает первого сообщения)'
-        : state.bannedUsers.includes(id) ? ' (забанен)' : '';
+        : state.bannedUsers.includes(id) ? ' (забанен)'
+          : state.nonSubscriberBans.includes(id) ? ' (не подписан)' : '';
       lines.push(`${formatBlockedUser(id, profile)}${status}`);
     }
     let part = 'Запрещено писать в группе:';
@@ -247,13 +280,13 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
       return;
     }
     const state = await store.read();
-    if (![...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers].includes(id)) {
+    if (![...state.blockedUsers, ...state.pendingUsers, ...state.bannedUsers, ...state.nonSubscriberBans].includes(id)) {
       await context.reply(`ID ${id} нет в списке ограниченных пользователей.`);
       return;
     }
     if (!state.pendingUsers.includes(id)) {
       try {
-        const result = state.bannedUsers.includes(id)
+        const result = state.bannedUsers.includes(id) || state.nonSubscriberBans.includes(id)
           ? await context.telegram.callApi('unbanChatMember', {
             chat_id: groupId, user_id: id, only_if_banned: true,
           })
@@ -283,6 +316,7 @@ function registerAntiSpamController(bot, { groupId, ownerId, store, logger = con
     if (!awaitingSpamPhrase || !isOwnerPrivate(context)) return next();
     await saveSpamPhrase(context, context.message.text.trim());
   });
+  return { forgiveOnJoin };
 }
 
 module.exports = registerAntiSpamController;

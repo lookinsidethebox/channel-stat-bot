@@ -3,7 +3,7 @@ const { mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 
 const defaultPath = path.join(__dirname, '../../data/anti-spam.json');
-const empty = () => ({ version: 4, phrases: [], blockedUsers: [], pendingUsers: [], bannedUsers: [], profiles: {} });
+const empty = () => ({ version: 5, phrases: [], blockedUsers: [], pendingUsers: [], bannedUsers: [], nonSubscriberBans: [], profiles: {} });
 const normalize = value => value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, ' ').trim();
 const validId = value => Number.isSafeInteger(value) && value > 0;
 
@@ -13,20 +13,22 @@ function validProfile(profile) {
 }
 
 function validate(data) {
-  if (!data || ![1, 2, 3, 4].includes(data.version) || !Array.isArray(data.phrases)
+  if (!data || ![1, 2, 3, 4, 5].includes(data.version) || !Array.isArray(data.phrases)
     || !data.phrases.every(value => typeof value === 'string' && value.trim())
     || !Array.isArray(data.blockedUsers) || !data.blockedUsers.every(validId)
-    || (data.version === 4 && (!Array.isArray(data.pendingUsers) || !data.pendingUsers.every(validId)
+    || (data.version >= 4 && (!Array.isArray(data.pendingUsers) || !data.pendingUsers.every(validId)
       || !Array.isArray(data.bannedUsers) || !data.bannedUsers.every(validId)))
+    || (data.version === 5 && (!Array.isArray(data.nonSubscriberBans) || !data.nonSubscriberBans.every(validId)))
     || (data.version >= 3 && (!data.profiles || typeof data.profiles !== 'object'
       || Array.isArray(data.profiles) || !Object.entries(data.profiles).every(([id, profile]) =>
         validId(Number(id)) && validProfile(profile))))) {
     throw new Error('ANTI_SPAM_INVALID_STATE');
   }
   // Version 1 included username rules. They are deliberately discarded.
-  return { version: 4, phrases: data.phrases, blockedUsers: data.blockedUsers,
-    pendingUsers: data.version === 4 ? data.pendingUsers : [],
-    bannedUsers: data.version === 4 ? data.bannedUsers : [],
+  return { version: 5, phrases: data.phrases, blockedUsers: data.blockedUsers,
+    pendingUsers: data.version >= 4 ? data.pendingUsers : [],
+    bannedUsers: data.version >= 4 ? data.bannedUsers : [],
+    nonSubscriberBans: data.version === 5 ? data.nonSubscriberBans : [],
     profiles: data.version >= 3 ? data.profiles : {} };
 }
 
@@ -96,14 +98,30 @@ function createAntiSpamStore(filePath = defaultPath) {
       return update(data => {
         data.pendingUsers = data.pendingUsers.filter(value => value !== id);
         data.blockedUsers = data.blockedUsers.filter(value => value !== id);
+        data.nonSubscriberBans = data.nonSubscriberBans.filter(value => value !== id);
         if (!data.bannedUsers.includes(id)) data.bannedUsers.push(id);
         if (profile) data.profiles[id] = profile;
+      });
+    },
+    banNonSubscriber(id, profile) {
+      if (!validId(id)) throw new Error('ANTI_SPAM_INVALID_USER');
+      if (profile !== undefined && !validProfile(profile)) throw new Error('ANTI_SPAM_INVALID_PROFILE');
+      return update(data => {
+        if (!data.nonSubscriberBans.includes(id)) data.nonSubscriberBans.push(id);
+        if (profile) data.profiles[id] = profile;
+      });
+    },
+    forgiveSubscriber(id) {
+      if (!validId(id)) throw new Error('ANTI_SPAM_INVALID_USER');
+      return update(data => {
+        data.nonSubscriberBans = data.nonSubscriberBans.filter(value => value !== id);
+        if (![...data.blockedUsers, ...data.pendingUsers, ...data.bannedUsers].includes(id)) delete data.profiles[id];
       });
     },
     saveProfile(id, profile) {
       if (!validId(id) || !validProfile(profile)) throw new Error('ANTI_SPAM_INVALID_PROFILE');
       return update(data => {
-        if ([...data.blockedUsers, ...data.pendingUsers, ...data.bannedUsers].includes(id)) data.profiles[id] = profile;
+        if ([...data.blockedUsers, ...data.pendingUsers, ...data.bannedUsers, ...data.nonSubscriberBans].includes(id)) data.profiles[id] = profile;
       });
     },
     unblockId(id) {
@@ -113,6 +131,7 @@ function createAntiSpamStore(filePath = defaultPath) {
         data.blockedUsers = data.blockedUsers.filter(value => value !== id);
         data.pendingUsers = data.pendingUsers.filter(value => value !== id);
         data.bannedUsers = data.bannedUsers.filter(value => value !== id);
+        data.nonSubscriberBans = data.nonSubscriberBans.filter(value => value !== id);
         delete data.profiles[id];
         return blocked;
       });
