@@ -1,6 +1,6 @@
 const PRESENT = '✅ Пользователь есть на канале';
 const ABSENT = '🚫 Пользователя нет на канале';
-const INPUT_PROMPT = 'Пришли username (например, @Lisa_948) или числовой ID пользователя. Для отмены отправь /cancel.';
+const INPUT_PROMPT = 'Пришли username или числовой ID пользователя. Для отмены отправь /cancel.';
 
 function parseUser(value) {
   const input = value.trim();
