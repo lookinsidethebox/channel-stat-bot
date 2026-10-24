@@ -80,6 +80,30 @@ test('/check rejects invalid input and never claims absence when Telegram fails'
   assert.equal(h.errors.length, 1);
 });
 
+test('/check logs the Bot API error that prevented a membership check', async () => {
+  const error = new Error('400: Bad Request: user not found');
+  error.response = { error_code: 400, description: 'Bad Request: user not found' };
+  const h = harness({ members: [error] });
+  await h.bot.handleUpdate(update(123, '/check 456', 1));
+  assert.equal(h.replies.at(-1), 'Не удалось проверить подписку. Попробуй ещё раз позже.');
+  assert.deepEqual(h.errors, [['Channel membership lookup failed:', '400: Bad Request: user not found']]);
+});
+
+test('/check treats PARTICIPANT_ID_INVALID as absence for username and numeric ID', async () => {
+  const invalidParticipant = () => {
+    const error = new Error('400: Bad Request: PARTICIPANT_ID_INVALID');
+    error.response = { error_code: 400, description: 'Bad Request: PARTICIPANT_ID_INVALID' };
+    return error;
+  };
+  const h = harness({ members: [invalidParticipant(), invalidParticipant()] });
+  await h.bot.handleUpdate(update(123, '/check @Pine_Beach', 1));
+  assert.equal(h.replies.at(-1), '🚫 Пользователя нет на канале');
+  await h.bot.handleUpdate(update(123, '456', 2));
+  assert.equal(h.replies.at(-1), '🚫 Пользователя нет на канале');
+  assert.deepEqual(h.requests.map(([, params]) => params.user_id), [456, 456]);
+  assert.deepEqual(h.errors, []);
+});
+
 test('/check does not claim absence when username resolution is unavailable', async () => {
   const h = harness({ resolveUsername: async () => { throw new Error('AUTH_KEY_UNREGISTERED'); } });
   await h.bot.handleUpdate(update(123, '/check', 1));

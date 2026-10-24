@@ -19,6 +19,20 @@ function isPresent(member) {
   throw new Error('UNKNOWN_MEMBER_STATUS');
 }
 
+function membershipErrorForLog(error) {
+  const code = error?.response?.error_code;
+  const description = error?.response?.description;
+  if (Number.isInteger(code) && typeof description === 'string') {
+    return `${code}: ${description.replace(/\s+/g, ' ').slice(0, 200)}`;
+  }
+  return /^[A-Z0-9_]+$/.test(error?.message || '') ? error.message : 'MEMBERSHIP_LOOKUP_FAILED';
+}
+
+function isInvalidParticipant(error) {
+  return error?.response?.error_code === 400
+    && /^(?:Bad Request: )?PARTICIPANT_ID_INVALID$/.test(error.response.description || '');
+}
+
 function registerCheckController(bot, { channelId, resolveUsername, logger = console }) {
   let awaitingUser = false;
 
@@ -50,7 +64,11 @@ function registerCheckController(bot, { channelId, resolveUsername, logger = con
       const member = await context.telegram.callApi('getChatMember', { chat_id: channelId, user_id: id });
       await context.reply(isPresent(member) ? PRESENT : ABSENT);
     } catch (error) {
-      logger.error('Channel membership lookup failed:', /^[A-Z0-9_]+$/.test(error.message || '') ? error.message : 'MEMBERSHIP_LOOKUP_FAILED');
+      if (isInvalidParticipant(error)) {
+        await context.reply(ABSENT);
+        return;
+      }
+      logger.error('Channel membership lookup failed:', membershipErrorForLog(error));
       await context.reply('Не удалось проверить подписку. Попробуй ещё раз позже.');
     }
   }
