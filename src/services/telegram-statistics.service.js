@@ -62,6 +62,14 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
     return operation;
   }
   return {
+    resolveUsername(username) {
+      return request(async activeClient => {
+        const resolved = await activeClient.invoke(new Api.contacts.ResolveUsername({ username }));
+        const user = resolved.users?.find(item => String(item.id) === String(resolved.peer?.userId));
+        if (!user) throw new Error('USERNAME_NOT_A_USER');
+        return Number(user.id);
+      });
+    },
     fetch() {
       return request(async activeClient => {
         const stats = await activeClient.invoke(new Api.stats.GetBroadcastStats({ channel: inputChannel }), statsDc);
