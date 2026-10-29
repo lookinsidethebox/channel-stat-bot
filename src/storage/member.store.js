@@ -169,6 +169,12 @@ function createMemberStore(filePath = defaultFilePath) {
     return data.members.find(member => String(member.userId) === String(userId) && member.addedAt === addedAt);
   }
 
+  async function getLatestMember(userId) {
+    await writeQueue;
+    const { members } = await readMemberData(filePath);
+    return members.findLast(member => String(member.userId) === String(userId) && member.addedAt) || null;
+  }
+
   async function getMemberAtRemoval(userId, removedAt) {
     await writeQueue;
     const data = await readMemberData(filePath);
@@ -367,7 +373,7 @@ function createMemberStore(filePath = defaultFilePath) {
   }
 
   return { recordMemberEvent, saveLatestPost, migrateCampaignFields, getPendingSourceLookups, resolveMemberSource,
-    getMemberByNotificationMessage, setManualSourceByNotification, getMember, getMemberAtRemoval,
+    getMemberByNotificationMessage, setManualSourceByNotification, getMember, getLatestMember, getMemberAtRemoval,
     getMemberHistory, countEvents, summarizePeriod, getPendingCampaignLookups, resolveMemberCampaign, assignUrlPromos, getPendingJoinNotifications,
     getPendingSourceNotifications, getPendingCampaignNotifications, markSourceNotified, markCampaignNotified,
     prepareJoinNotification, markJoinNotificationPartSent, markJoinNotified };

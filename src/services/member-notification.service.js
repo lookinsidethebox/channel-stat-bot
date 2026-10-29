@@ -212,4 +212,5 @@ function createMemberNotifier({ memberStore, sendMessage, channelId, logger = co
   return { sendPending };
 }
 
-module.exports = { createMemberNotifier, formatJoinNotification, formatLeaveNotification };
+module.exports = { createMemberNotifier, formatJoinNotification, formatLeaveNotification,
+  formatDateTime, formatPost, formatMemberName, sourceLabels };

@@ -135,7 +135,7 @@ test('Telegram command menu is registered only for the owner chat', async t => {
   await bot.registerOwnerCommands();
   assert.deepEqual(calls[0][2], { scope: { type: 'chat', chat_id: 123 } });
   assert.deepEqual(calls[0][1].map(item => item.command), [
-    'start', 'promo', 'check', 'spam_add', 'spam_remove', 'spam_list',
+    'start', 'promo', 'check', 'info', 'spam_add', 'spam_remove', 'spam_list',
     'block', 'unblock', 'block_list',
   ]);
   assert.deepEqual(calls[1][1], { chatId: 123, menuButton: { type: 'commands' } });

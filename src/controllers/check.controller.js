@@ -96,3 +96,4 @@ function registerCheckController(bot, { channelId, resolveUsername, logger = con
 }
 
 module.exports = registerCheckController;
+module.exports.parseUser = parseUser;

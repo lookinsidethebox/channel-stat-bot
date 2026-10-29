@@ -7,6 +7,7 @@ const registerManualSourceController = require('./controllers/manual-source.cont
 const createOwnerOnlyMiddleware = require('./middleware/owner-only.middleware');
 const registerAntiSpamController = require('./controllers/anti-spam.controller');
 const registerCheckController = require('./controllers/check.controller');
+const { registerInfoController } = require('./controllers/info.controller');
 const { createAntiSpamStore } = require('./storage/anti-spam.store');
 const createOrderedChannelUpdatesMiddleware = require('./middleware/ordered-channel-updates.middleware');
 const createDebugMemberUpdatesMiddleware = require('./middleware/debug-member-updates.middleware');
@@ -46,6 +47,7 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
       { command: 'start', description: 'Открыть главное меню бота' },
       { command: 'promo', description: 'Создать URL-кампанию' },
       { command: 'check', description: 'Проверить подписку по username или ID' },
+      { command: 'info', description: 'Информация о подписчике по username или ID' },
     ];
     if (discussionGroupId) commands.push(
       { command: 'spam_add', description: 'Добавить антиспам-фразу' },
@@ -134,6 +136,10 @@ function createBot({ token, ownerId, channelId, discussionGroupId, debugMemberUp
   bot.use(createOwnerOnlyMiddleware(ownerId));
   registerCheckController(bot, {
     channelId, resolveUsername: channelStatisticsReader && (username => channelStatisticsReader.resolveUsername(username)), logger,
+  });
+  registerInfoController(bot, {
+    channelId, memberStore,
+    resolveUsername: channelStatisticsReader && (username => channelStatisticsReader.resolveUsername(username)), logger,
   });
   registerManualSourceController(bot, { memberStore, sourceStatistics: bot.sourceStatistics,
     adsStatistics: bot.adsStatistics, urlPromos: bot.urlPromos, notifyJoins: sendPendingJoins, logger });
