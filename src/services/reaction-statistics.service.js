@@ -8,12 +8,15 @@ function applyReactionSnapshots(snapshot, { periodStart, periodEnd }, state) {
     const previous = snapshot.previousPosts?.find(entry => entry.messageId === post.messageId);
     const known = before?.posts.find(entry => entry.messageId === post.messageId);
     const isNew = Date.parse(post.postedAt) >= Date.parse(periodStart);
-    return { ...previous, messageId: post.messageId, reactions: known?.reactions ?? (isNew ? 0 : null) };
+    return { ...previous, messageId: post.messageId, reactions: known?.reactions ?? (isNew ? 0 : null),
+      publicForwards: known?.publicForwards ?? (isNew ? 0 : null) };
   });
   const posts = snapshot.posts.map(post => {
     const known = after?.posts.find(entry => entry.messageId === post.messageId);
     return { ...post, reactions: known?.reactions ?? post.currentReactions ?? null,
-      reactionPeriod: known ? 'day' : 'current' };
+      reactionPeriod: known ? 'day' : 'current',
+      publicForwards: known?.publicForwards ?? post.currentPublicForwards ?? null,
+      publicForwardsPeriod: known?.publicForwards != null ? 'day' : 'current' };
   });
   return { ...snapshot, posts, previousPosts };
 }
@@ -40,7 +43,7 @@ function createReactionStatistics({ reader, summaryStore, now = () => new Date()
       const capturedAt = now().toISOString();
       if (Date.parse(capturedAt) >= boundary + REACTION_SNAPSHOT_GRACE_MS) return;
       await summaryStore.saveReactionSnapshot({ boundaryAt, capturedAt,
-        posts: snapshot.posts.map(({ messageId, postedAt, reactions }) => ({ messageId, postedAt, reactions })) });
+        posts: snapshot.posts.map(({ messageId, postedAt, reactions, publicForwards }) => ({ messageId, postedAt, reactions, publicForwards })) });
     } catch (error) {
       const seconds = error.retryAfterSeconds || 0;
       retryAt = now().getTime() + Math.max(30000, seconds * 1000);

@@ -12,6 +12,7 @@ function validReactionSnapshot(snapshot, boundaryAt) {
     && new Set(snapshot.posts.map(post => post?.messageId)).size === snapshot.posts.length
     && snapshot.posts.every(post => Number.isSafeInteger(post?.messageId) && post.messageId > 0
       && Number.isFinite(Date.parse(post.postedAt)) && Date.parse(post.postedAt) < boundary
+      && (post.publicForwards == null || (Number.isSafeInteger(post.publicForwards) && post.publicForwards >= 0))
       && Number.isSafeInteger(post.reactions) && post.reactions >= 0);
 }
 

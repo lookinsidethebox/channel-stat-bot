@@ -3,7 +3,7 @@ const { StringSession } = require('teleproto/sessions');
 const { Logger, LogLevel } = require('teleproto/extensions/Logger');
 const { readSession, assertOwner } = require('./telegram-user-session');
 const { parseSourceGraph } = require('./source-statistics.service');
-const { fetchLatestPostStatistics } = require('./telegram-post-statistics.service');
+const { fetchLatestPostStatistics, addPublicForwards } = require('./telegram-post-statistics.service');
 const { fetchDailyPostStatistics } = require('./telegram-post-daily-statistics.service');
 
 function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, sessionPath }) {
@@ -82,7 +82,10 @@ function createTelegramStatisticsReader({ apiId, apiHash, ownerId, channelId, se
       });
     },
     fetchPosts(options) {
-      return request(activeClient => fetchLatestPostStatistics(activeClient, inputChannel, { ...options, channelId }));
+      return request(async activeClient => {
+        const snapshot = await fetchLatestPostStatistics(activeClient, inputChannel, { ...options, channelId });
+        return { ...snapshot, posts: await addPublicForwards(activeClient, inputChannel, snapshot.posts, statsDc) };
+      });
     },
     fetchMonthlyPosts(options) {
       return request(activeClient => fetchLatestPostStatistics(activeClient, inputChannel, {

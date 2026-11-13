@@ -1,5 +1,5 @@
 const { Api } = require('teleproto');
-const { fetchLatestPostStatistics } = require('./telegram-post-statistics.service');
+const { fetchLatestPostStatistics, addPublicForwards } = require('./telegram-post-statistics.service');
 
 const HOUR = 3600000;
 
@@ -79,14 +79,15 @@ async function fetchDailyPostStatistics(client, inputChannel, options, statsDc) 
   }
   const posts = [];
   const previousPosts = [];
-  for (const post of history.posts) {
+  for (const post of await addPublicForwards(client, inputChannel, history.posts, statsDc)) {
     const stats = await client.invoke(new Api.stats.GetMessageStats({ channel: inputChannel, msgId: post.messageId }), statsDc);
     const views = await readGraph(stats.viewsGraph);
     const { current, previous } = dailyPostCounters(post, views, options);
     // The emotion graph is not the complete message reaction counter. Keep the
     // actual current count separate from historical counters until snapshots
     // at the requested day boundaries are available.
-    posts.push({ ...post, ...current, reactions: null, currentReactions: post.reactions });
+    posts.push({ ...post, ...current, reactions: null, currentReactions: post.reactions,
+      currentPublicForwards: post.publicForwards, publicForwards: null });
     previousPosts.push({ messageId: post.messageId, ...previous, reactions: null });
   }
   return { channelId, fetchedAt: new Date().toISOString(), posts, previousPosts };

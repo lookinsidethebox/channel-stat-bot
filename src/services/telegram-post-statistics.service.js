@@ -69,4 +69,28 @@ async function fetchLatestPostStatistics(client, inputChannel, { channelId, befo
   return { channelId, fetchedAt: new Date().toISOString(), posts };
 }
 
-module.exports = { fetchLatestPostStatistics };
+async function addPublicForwards(client, inputChannel, posts, statsDc) {
+  const result = [];
+  for (const post of posts) {
+    let publicForwards = null;
+    if (post.forwards === 0) publicForwards = 0;
+    else if (post.forwards != null) {
+      try {
+        const response = await client.invoke(new Api.stats.GetMessagePublicForwards({
+          channel: inputChannel, msgId: post.messageId, offset: '', limit: 1,
+        }), statsDc);
+        const publicCount = response.count;
+        if (Number.isSafeInteger(publicCount) && publicCount >= 0 && publicCount <= post.forwards) {
+          publicForwards = publicCount;
+        }
+      } catch (error) {
+        // Missing optional statistics must not prevent delivery of the report.
+        if (error.seconds > 0) throw error;
+      }
+    }
+    result.push({ ...post, publicForwards });
+  }
+  return result;
+}
+
+module.exports = { fetchLatestPostStatistics, addPublicForwards };
